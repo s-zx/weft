@@ -387,6 +387,8 @@ const XtermOutput: React.FC<{ bytes: Uint8Array }> = ({ bytes }) => {
             theme: {
                 background: "#1a1a1a",
                 foreground: "#e0e0e0",
+                cursor: "transparent",
+                cursorAccent: "transparent",
             },
         });
         const fit = new FitAddon();
@@ -471,6 +473,29 @@ const TermBlockRow: React.FC<{ block: CmdBlock; output: Uint8Array | undefined }
     );
 };
 TermBlockRow.displayName = "TermBlockRow";
+
+const TermBlocksRunningPanel: React.FC<{ model: TermBlocksViewModel; runningCmd: string | null }> = ({
+    model,
+    runningCmd,
+}) => {
+    return (
+        <div className="termblocks-running-row">
+            <span className="termblocks-running-indicator" aria-hidden />
+            <span className="termblocks-running-label">
+                Running{runningCmd ? `: ${runningCmd}` : "…"}
+            </span>
+            <button
+                type="button"
+                className="termblocks-running-stop"
+                title="Send SIGINT (Ctrl-C)"
+                onClick={() => model.sendInterrupt()}
+            >
+                ⊗ Stop
+            </button>
+        </div>
+    );
+};
+TermBlocksRunningPanel.displayName = "TermBlocksRunningPanel";
 
 const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
     const inputRef = React.useRef<HTMLInputElement>(null);
@@ -565,6 +590,7 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const lastOid = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1].oid : "";
     const lastOutputLen = lastOid && outputs[lastOid] != null ? outputs[lastOid].length : 0;
     const inAltScreen = altOID !== "";
+    const runningBlock = React.useMemo(() => blocks.find((b) => b.state === "running") ?? null, [blocks]);
 
     // Scroll to the bottom whenever the last visible block changes OR its
     // output bytes arrive.  xterm itself lays out across a couple of frames,
@@ -632,7 +658,14 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                     </div>
                 )}
             </div>
-            <TermBlocksInput model={model} />
+            {runningBlock != null ? (
+                <TermBlocksRunningPanel
+                    model={model}
+                    runningCmd={runningBlock.cmd ?? null}
+                />
+            ) : (
+                <TermBlocksInput model={model} />
+            )}
         </div>
     );
 };

@@ -63,14 +63,14 @@ Want deeper triage? Run these and paste results:
 \`\`\`bash
 # 1) Scan recent logs for problems
 grep -Ei 'error|panic|fatal|websocket|1006|1011' \\
-  "$HOME/Library/Application Support/waveterm-dev/waveapp.log" | tail -n 200
+  "$HOME/Library/Application Support/weft-dev/waveapp.log" | tail -n 200
 
 # 2) Inspect around the disconnect window
 awk '($0 ~ /2025-10-10 18:08:2[0-9]/){print}' \\
-  "$HOME/Library/Application Support/waveterm-dev/waveapp.log"
+  "$HOME/Library/Application Support/weft-dev/waveapp.log"
 
 # 3) Live follow for recurring drops
-tail -f "$HOME/Library/Application Support/waveterm-dev/waveapp.log" \\
+tail -f "$HOME/Library/Application Support/weft-dev/waveapp.log" \\
   | grep -Ei 'error|panic|fatal|websocket|close'
 \`\`\`
 

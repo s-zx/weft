@@ -254,6 +254,13 @@ declare global {
         createdat: number;
     };
 
+    // cbtypes.CmdBlockAltScreenEvent
+    type CmdBlockAltScreenEvent = {
+        blockid: string;
+        oid?: string;
+        enter: boolean;
+    };
+
     // cbtypes.CmdBlockChunkEvent
     type CmdBlockChunkEvent = {
         blockid: string;

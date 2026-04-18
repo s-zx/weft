@@ -181,6 +181,29 @@
     }
 }
 
+.termblocks-altscreen-wrap {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    padding: 4px;
+    background: #000;
+}
+
+.termblocks-altscreen {
+    flex: 1 1 auto;
+    min-height: 0;
+    min-width: 0;
+
+    .xterm {
+        height: 100%;
+    }
+
+    .xterm-viewport,
+    .xterm-screen {
+        height: 100%;
+    }
+}
+
 .termblocks-placeholder {
     color: var(--secondary-text);
     font-style: italic;

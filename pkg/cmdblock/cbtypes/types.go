@@ -27,6 +27,16 @@ type CmdBlockChunkEvent struct {
 	Data64  string `json:"data64"`
 }
 
+// CmdBlockAltScreenEvent is published on cmdblock:altscreen when the PTY
+// enters (Enter=true) or leaves (Enter=false) the alternate screen buffer
+// (DECSET 1049 / DECRST 1049). The frontend switches to a single full-height
+// xterm in pass-through mode while Enter, and back to the block list on exit.
+type CmdBlockAltScreenEvent struct {
+	BlockID string `json:"blockid"`
+	OID     string `json:"oid,omitempty"`
+	Enter   bool   `json:"enter"`
+}
+
 // CmdBlock is one shell-command lifecycle tracked inside a terminal block.
 //
 // Each row covers the span from OSC 16162;A (prompt appeared) to OSC 16162;D

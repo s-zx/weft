@@ -4,6 +4,7 @@
 package cmdblock
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -14,18 +15,22 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wps"
 )
 
+var altScreenEnterSeq = []byte("\x1b[?1049h")
+var altScreenExitSeq = []byte("\x1b[?1049l")
+
 // Tracker glues the OSC 16162 parser to the cmdblock store for one shell
 // session.  Hook it into a PTY read loop by calling OnBytes each time a chunk
 // is appended to the parent blockfile: Tracker translates A/C/D events into
 // MakePromptStarted / MarkCommandSubmitted / MarkCommandDone calls and
 // publishes cmdblock:row + cmdblock:chunk events for live updates.
 type Tracker struct {
-	mu         sync.Mutex
-	blockID    string
-	parser     *Parser
-	currentOID string
-	state      string // matches the current row's state ("prompt"/"running"/"")
-	shellType  string
+	mu           sync.Mutex
+	blockID      string
+	parser       *Parser
+	currentOID   string
+	state        string // matches the current row's state ("prompt"/"running"/"")
+	shellType    string
+	altScreen    bool
 }
 
 func MakeTracker(blockID string) *Tracker {
@@ -51,6 +56,39 @@ func (t *Tracker) OnBytes(ctx context.Context, chunk []byte) {
 	if t.state == StateRunning && t.currentOID != "" && len(chunk) > 0 {
 		t.publishChunk(t.currentOID, chunkStart, chunk)
 	}
+	t.detectAltScreen(chunk)
+}
+
+// detectAltScreen scans chunk for the DECSET/DECRST 1049 sequences that
+// toggle the alternate screen buffer. When the state flips, publishes a
+// cmdblock:altscreen event so the frontend can swap its layout. The scan
+// is simplistic — a sequence split exactly across two chunks would be
+// missed — but the app itself will usually re-emit on the next toggle.
+func (t *Tracker) detectAltScreen(chunk []byte) {
+	enter := bytes.LastIndex(chunk, altScreenEnterSeq)
+	exit := bytes.LastIndex(chunk, altScreenExitSeq)
+	var target bool
+	if enter < 0 && exit < 0 {
+		return
+	}
+	if enter > exit {
+		target = true
+	} else {
+		target = false
+	}
+	if t.altScreen == target {
+		return
+	}
+	t.altScreen = target
+	wps.Broker.Publish(wps.WaveEvent{
+		Event:  wps.Event_CmdBlockAltScreen,
+		Scopes: []string{"block:" + t.blockID},
+		Data: &cbtypes.CmdBlockAltScreenEvent{
+			BlockID: t.blockID,
+			OID:     t.currentOID,
+			Enter:   target,
+		},
+	})
 }
 
 func (t *Tracker) handleEvent(ctx context.Context, ev Event) {

@@ -36,6 +36,7 @@ const (
 	Event_Badge               = "badge"                // type: baseds.BadgeEvent
 	Event_CmdBlockRow         = "cmdblock:row"         // type: *cbtypes.CmdBlock
 	Event_CmdBlockChunk       = "cmdblock:chunk"       // type: *cbtypes.CmdBlockChunkEvent
+	Event_CmdBlockAltScreen   = "cmdblock:altscreen"   // type: *cbtypes.CmdBlockAltScreenEvent
 )
 
 var AllEvents []string = []string{
@@ -60,6 +61,7 @@ var AllEvents []string = []string{
 	Event_Badge,
 	Event_CmdBlockRow,
 	Event_CmdBlockChunk,
+	Event_CmdBlockAltScreen,
 }
 
 type WaveEvent struct {

@@ -33,6 +33,7 @@ export class TermBlocksViewModel implements ViewModel {
     outputCacheAtom: jotai.PrimitiveAtom<Record<string, Uint8Array>>;
     loadingAtom: jotai.PrimitiveAtom<boolean>;
     errorAtom: jotai.PrimitiveAtom<string>;
+    altScreenOIDAtom: jotai.PrimitiveAtom<string>;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -47,6 +48,7 @@ export class TermBlocksViewModel implements ViewModel {
         >;
         this.loadingAtom = jotai.atom<boolean>(true);
         this.errorAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
+        this.altScreenOIDAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
 
         this.viewText = jotai.atom<HeaderElem[]>([
             {
@@ -87,6 +89,17 @@ export class TermBlocksViewModel implements ViewModel {
                     if (chunk != null) {
                         this.applyChunk(chunk);
                     }
+                },
+            })
+        );
+        this.unsubs.push(
+            waveEventSubscribeSingle({
+                eventType: "cmdblock:altscreen",
+                scope,
+                handler: (ev) => {
+                    const data = ev.data as CmdBlockAltScreenEvent | undefined;
+                    if (data == null) return;
+                    globalStore.set(this.altScreenOIDAtom, data.enter ? data.oid || "ALT" : "");
                 },
             })
         );
@@ -258,6 +271,79 @@ function countNewlines(bytes: Uint8Array): number {
     }
     return n;
 }
+
+const AltScreenXterm: React.FC<{ bytes: Uint8Array; onData: (s: string) => void }> = ({ bytes, onData }) => {
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const termRef = React.useRef<Terminal | null>(null);
+    const writtenRef = React.useRef<number>(0);
+    const onDataRef = React.useRef(onData);
+    React.useEffect(() => {
+        onDataRef.current = onData;
+    });
+
+    React.useEffect(() => {
+        const host = containerRef.current;
+        if (host == null) return;
+        const term = new Terminal({
+            convertEol: false,
+            cursorBlink: true,
+            fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+            fontSize: 13,
+            theme: {
+                background: "#000000",
+                foreground: "#e0e0e0",
+            },
+        });
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        term.open(host);
+        try {
+            fit.fit();
+        } catch {
+            // ignore
+        }
+        term.focus();
+        const onDataSub = term.onData((data) => onDataRef.current(data));
+        termRef.current = term;
+        writtenRef.current = 0;
+
+        const ro = new ResizeObserver(() => {
+            try {
+                fit.fit();
+            } catch {
+                // ignore
+            }
+        });
+        ro.observe(host);
+        return () => {
+            ro.disconnect();
+            onDataSub.dispose();
+            term.dispose();
+            termRef.current = null;
+        };
+    }, []);
+
+    React.useEffect(() => {
+        const term = termRef.current;
+        if (term == null) return;
+        const written = writtenRef.current;
+        if (bytes.length === written) {
+            return;
+        }
+        if (bytes.length < written) {
+            term.reset();
+            term.write(bytes);
+        } else if (written === 0) {
+            term.write(bytes);
+        } else {
+            term.write(bytes.subarray(written));
+        }
+        writtenRef.current = bytes.length;
+    }, [bytes]);
+
+    return <div className="termblocks-altscreen" ref={containerRef} />;
+};
+AltScreenXterm.displayName = "AltScreenXterm";
 
 const XtermOutput: React.FC<{ bytes: Uint8Array }> = ({ bytes }) => {
     const containerRef = React.useRef<HTMLDivElement>(null);
@@ -448,7 +534,23 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const outputs = useAtomValue(model.outputCacheAtom);
     const loading = useAtomValue(model.loadingAtom);
     const error = useAtomValue(model.errorAtom);
+    const altOID = useAtomValue(model.altScreenOIDAtom);
     const scrollRef = React.useRef<HTMLDivElement>(null);
+
+    // Alt-screen mode: a TUI (less/vim/top/…) took over the PTY, so we show
+    // the running block's buffer in a single full-viewport xterm with stdin
+    // enabled.  Keystrokes go straight to the PTY via onData.
+    if (altOID !== "") {
+        const running = blocks.find((b) => b.state === "running") ?? blocks[blocks.length - 1];
+        const bytes = running != null ? outputs[running.oid] ?? new Uint8Array() : new Uint8Array();
+        return (
+            <div className="termblocks-root">
+                <div className="termblocks-altscreen-wrap">
+                    <AltScreenXterm bytes={bytes} onData={(s) => model.sendBytes(s)} />
+                </div>
+            </div>
+        );
+    }
 
     // Only render rows that actually represent a command — a bare "prompt"
     // state is the transient anchor the next OSC C will attach to, with no

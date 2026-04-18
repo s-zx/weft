@@ -44,6 +44,7 @@ var WaveEventDataTypes = map[string]reflect.Type{
 	wps.Event_Badge:               reflect.TypeOf(baseds.BadgeEvent{}),
 	wps.Event_CmdBlockRow:         reflect.TypeOf((*cbtypes.CmdBlock)(nil)),
 	wps.Event_CmdBlockChunk:       reflect.TypeOf((*cbtypes.CmdBlockChunkEvent)(nil)),
+	wps.Event_CmdBlockAltScreen:   reflect.TypeOf((*cbtypes.CmdBlockAltScreenEvent)(nil)),
 }
 
 func getWaveEventDataTSType(eventName string, tsTypesMap map[reflect.Type]string) string {

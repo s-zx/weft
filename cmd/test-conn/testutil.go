@@ -41,7 +41,7 @@ func setupWaveEnvVars() error {
 
 	configHome := os.Getenv("WAVETERM_CONFIG_HOME")
 	if configHome == "" {
-		configHome = filepath.Join(homeDir, ".config", "weft"+devSuffix)
+		configHome = filepath.Join(homeDir, ".config", "crest"+devSuffix)
 		os.Setenv("WAVETERM_CONFIG_HOME", configHome)
 	}
 	log.Printf("Using config directory: %s", configHome)
@@ -49,7 +49,7 @@ func setupWaveEnvVars() error {
 	dataHome := os.Getenv("WAVETERM_DATA_HOME")
 	if dataHome == "" {
 		if runtime.GOOS == "darwin" {
-			dataHome = filepath.Join(homeDir, "Library", "Application Support", "weft"+devSuffix)
+			dataHome = filepath.Join(homeDir, "Library", "Application Support", "crest"+devSuffix)
 			os.Setenv("WAVETERM_DATA_HOME", dataHome)
 		} else {
 			return fmt.Errorf("WAVETERM_DATA_HOME must be set on non-macOS systems")
@@ -225,7 +225,7 @@ func testWshExec(connName string, cmd string, timeout time.Duration) error {
 		Env:   make(map[string]string),
 		Exp:   time.Now().Add(5 * time.Minute),
 	}
-	swapToken.Env["TERM_PROGRAM"] = "weft"
+	swapToken.Env["TERM_PROGRAM"] = "crest"
 	swapToken.Env["WAVETERM"] = "1"
 	swapToken.Env["WAVETERM_VERSION"] = wavebase.WaveVersion
 	swapToken.Env["WAVETERM_CONN"] = connName

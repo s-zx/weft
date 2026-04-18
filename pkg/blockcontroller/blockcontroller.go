@@ -462,7 +462,7 @@ func makeSwapToken(ctx context.Context, logCtx context.Context, blockId string, 
 		Env:   make(map[string]string),
 		Exp:   time.Now().Add(5 * time.Minute),
 	}
-	token.Env["TERM_PROGRAM"] = "weft"
+	token.Env["TERM_PROGRAM"] = "crest"
 	token.Env["WAVETERM_BLOCKID"] = blockId
 	token.Env["WAVETERM_VERSION"] = wavebase.WaveVersion
 	token.Env["WAVETERM"] = "1"

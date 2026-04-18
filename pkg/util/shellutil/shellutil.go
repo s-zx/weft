@@ -221,7 +221,7 @@ func WaveshellLocalEnvVars(termType string) map[string]string {
 		rtn["TERM"] = termType
 	}
 	// these are not necessary since they should be set with the swap token, but no harm in setting them here
-	rtn["TERM_PROGRAM"] = "weft"
+	rtn["TERM_PROGRAM"] = "crest"
 	if os.Getenv("COLORTERM") == "" {
 		rtn["COLORTERM"] = "truecolor"
 	}

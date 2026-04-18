@@ -168,8 +168,7 @@ export function VTab({
             onMouseLeave={() => onHoverChanged?.(false)}
             className={cn(
                 "group relative flex w-full shrink-0 cursor-pointer items-center pl-3 text-xs transition-colors select-none",
-                "whitespace-nowrap",
-                tab.subtitle ? "min-h-[44px]" : "h-9",
+                "whitespace-nowrap h-11",
                 active ? "text-primary" : isReordering ? "text-secondary" : "text-secondary hover:text-primary",
                 isDragging && "opacity-50"
             )}
@@ -202,7 +201,7 @@ export function VTab({
                 <div
                     ref={editableRef}
                     className={cn(
-                        "overflow-hidden text-ellipsis whitespace-nowrap",
+                        "overflow-hidden text-ellipsis whitespace-nowrap leading-tight",
                         isEditable && "rounded-[2px] bg-white/15 outline-none px-[3px]"
                     )}
                     contentEditable={isEditable}
@@ -215,27 +214,34 @@ export function VTab({
                 >
                     {tab.name}
                 </div>
-                {tab.subtitle && (
-                    <div className="flex items-center gap-[6px] text-[10px] text-secondary/80 overflow-hidden whitespace-nowrap">
+                {/*
+                  Subtitle row always renders (with &nbsp; as filler) so the
+                  tab height is stable across the lifecycle: a fresh tab
+                  without cwd or git info stays the same size as a populated
+                  one, which stops the whole sidebar from shifting as data
+                  trickles in.
+                */}
+                <div className="flex items-center gap-[6px] text-[10px] text-secondary/80 overflow-hidden whitespace-nowrap leading-tight min-h-[13px]">
+                    {tab.subtitle ? (
                         <span className="overflow-hidden text-ellipsis">{tab.subtitle}</span>
-                        {tab.gitBranch && (
-                            <span className="inline-flex items-center gap-[3px] shrink-0 text-[#b8f2c0]">
-                                <i className="fa-solid fa-code-branch text-[9px] opacity-80" aria-hidden />
-                                {tab.gitBranch}
-                            </span>
-                        )}
-                        {tab.gitChangedFiles != null && tab.gitChangedFiles > 0 && (
-                            <span className="shrink-0">
-                                {tab.gitAdds != null && tab.gitAdds > 0 && (
-                                    <span className="text-[#4caf50]">+{tab.gitAdds}</span>
-                                )}
-                                {tab.gitDels != null && tab.gitDels > 0 && (
-                                    <span className="text-[#e57373] ml-[3px]">-{tab.gitDels}</span>
-                                )}
-                            </span>
-                        )}
-                    </div>
-                )}
+                    ) : null}
+                    {tab.gitBranch && (
+                        <span className="inline-flex items-center gap-[3px] shrink-0 text-[#b8f2c0]">
+                            <i className="fa-solid fa-code-branch text-[9px] opacity-80" aria-hidden />
+                            {tab.gitBranch}
+                        </span>
+                    )}
+                    {tab.gitChangedFiles != null && tab.gitChangedFiles > 0 && (
+                        <span className="shrink-0">
+                            {tab.gitAdds != null && tab.gitAdds > 0 && (
+                                <span className="text-[#4caf50]">+{tab.gitAdds}</span>
+                            )}
+                            {tab.gitDels != null && tab.gitDels > 0 && (
+                                <span className="text-[#e57373] ml-[3px]">-{tab.gitDels}</span>
+                            )}
+                        </span>
+                    )}
+                </div>
             </div>
             {onClose && (
                 <button

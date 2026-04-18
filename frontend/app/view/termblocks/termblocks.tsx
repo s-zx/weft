@@ -572,7 +572,8 @@ const TermBlockRow: React.FC<{
     model: TermBlocksViewModel;
     fallbackCwd: string;
     home: string;
-}> = ({ block, output, model, fallbackCwd, home }) => {
+    gitInfo: GitInfoResponse | null;
+}> = ({ block, output, model, fallbackCwd, home, gitInfo }) => {
     const isDone = block.state === "done";
     const isRunning = block.state === "running";
     const isError = isDone && block.exitcode != null && block.exitcode !== 0;
@@ -580,11 +581,26 @@ const TermBlockRow: React.FC<{
     const showXterm = hasOutput || isRunning;
     const cwd = shortenCwd(block.cwd ?? fallbackCwd, home);
     const duration = formatDuration(block.durationms);
+    const branch = gitInfo?.isrepo ? gitInfo.branch : "";
+    const hasDiff = gitInfo?.isrepo && ((gitInfo.changedfiles ?? 0) > 0);
 
     return (
         <div className={cn("termblocks-row", `termblocks-row-${block.state}`, isError && "termblocks-row-error")}>
             <div className="termblocks-row-meta">
                 {cwd && <span className="termblocks-meta-cwd">{cwd}</span>}
+                {branch && (
+                    <span className="termblocks-meta-git">
+                        git:(<span className="termblocks-meta-branch">{branch}</span>)
+                    </span>
+                )}
+                {hasDiff && (
+                    <span className="termblocks-meta-diff">
+                        {gitInfo?.changedfiles}
+                        {" • "}
+                        <span className="termblocks-diff-add">+{gitInfo?.additions ?? 0}</span>{" "}
+                        <span className="termblocks-diff-del">-{gitInfo?.deletions ?? 0}</span>
+                    </span>
+                )}
                 {duration && <span className="termblocks-meta-dur">({duration})</span>}
                 {isError && (
                     <span className="termblocks-meta-exit" title={`exit ${block.exitcode}`}>
@@ -777,6 +793,7 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                                 model={model}
                                 fallbackCwd={blockMetaCwd}
                                 home={home}
+                                gitInfo={gitInfo}
                             />
                         ))}
                     </div>

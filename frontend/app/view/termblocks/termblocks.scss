@@ -92,6 +92,27 @@
     color: rgba(255, 255, 255, 0.55);
 }
 
+.termblocks-meta-git {
+    color: rgba(255, 255, 255, 0.45);
+}
+
+.termblocks-meta-branch {
+    color: #b8f2c0;
+    font-weight: 500;
+}
+
+.termblocks-meta-diff {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.termblocks-diff-add {
+    color: #4caf50;
+}
+
+.termblocks-diff-del {
+    color: #e57373;
+}
+
 .termblocks-meta-dur {
     opacity: 0.7;
 }

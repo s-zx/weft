@@ -141,6 +141,12 @@ export class WaveTabView extends WebContentsView {
                 webviewTag: true,
             },
         });
+        // Without this, Electron paints the WebContentsView with its
+        // default white background before the renderer's CSS applies.
+        // On new-tab creation that showed up as the "whole screen
+        // flashes white" moment.  Match the main BrowserWindow's
+        // backgroundColor so it blends into the app shell instead.
+        this.setBackgroundColor("#222222");
         this.createdTs = Date.now();
         this.isWaveAIOpen = false;
         this.savedInitOpts = null;

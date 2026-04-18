@@ -28,7 +28,7 @@ export function StarAskPage({ onClose, page = "upgrade" }: StarAskPageProps) {
             oref: WOS.makeORef("client", clientId),
             meta: { "onboarding:githubstar": true },
         });
-        window.open(`https://github.com/s-zx/weft?ref=${page}`, "_blank");
+        window.open(`https://github.com/s-zx/crest?ref=${page}`, "_blank");
         onClose();
     };
 
@@ -58,7 +58,7 @@ export function StarAskPage({ onClose, page = "upgrade" }: StarAskPageProps) {
             },
             { noresponse: true }
         );
-        window.open("https://github.com/s-zx/weft", "_blank");
+        window.open("https://github.com/s-zx/crest", "_blank");
     };
 
     const handleMaybeLater = async () => {

@@ -82,7 +82,7 @@ git clone git@github.com:wavetermdev/waveterm.git
 or
 
 ```sh
-git clone https://github.com/s-zx/weft.git
+git clone https://github.com/s-zx/crest.git
 ```
 
 ## Install code dependencies

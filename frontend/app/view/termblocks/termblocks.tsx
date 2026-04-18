@@ -6,6 +6,7 @@ import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { atoms } from "@/store/global";
 import { base64ToArray, cn, stringToBase64 } from "@/util/util";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
@@ -60,6 +61,18 @@ export class TermBlocksViewModel implements ViewModel {
                 onClick: () => this.switchToTerminal(),
             },
         ]);
+
+        // Ask wavesrv to (re)start the shell controller bound to this block.
+        // The term view does the same thing via termwrap.resyncController; we
+        // don't have a termwrap so we fire it from the model directly.  Without
+        // this call, controller=shell meta alone is not enough — the shell
+        // never actually spawns and input has nowhere to go.
+        RpcApi.ControllerResyncCommand(TabRpcClient, {
+            tabid: globalStore.get(atoms.staticTabId),
+            blockid: blockId,
+        }).catch((e) => {
+            console.warn("termblocks: ControllerResync failed", blockId, e);
+        });
 
         this.fetchBlocks();
         this.pollTimer = setInterval(() => {

@@ -38,6 +38,9 @@ export class TermBlocksViewModel implements ViewModel {
     altScreenOIDAtom: jotai.PrimitiveAtom<string>;
     blockCwdAtom!: jotai.Atom<string>;
     homeAtom: jotai.PrimitiveAtom<string>;
+    gitInfoAtom: jotai.PrimitiveAtom<GitInfoResponse | null>;
+    gitPollTimer: ReturnType<typeof setInterval> | null = null;
+    lastGitCwd = "";
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -62,6 +65,12 @@ export class TermBlocksViewModel implements ViewModel {
         }
         const cwdMetaAtom = getBlockMetaKeyAtom(blockId, "cmd:cwd");
         this.blockCwdAtom = jotai.atom((get) => (get(cwdMetaAtom) as string) ?? "");
+        this.gitInfoAtom = jotai.atom<GitInfoResponse | null>(null) as jotai.PrimitiveAtom<GitInfoResponse | null>;
+        this.gitPollTimer = setInterval(() => {
+            if (!this.disposed) {
+                this.refreshGitInfo();
+            }
+        }, 4000);
 
         this.viewText = jotai.atom<HeaderElem[]>([
             {
@@ -200,6 +209,26 @@ export class TermBlocksViewModel implements ViewModel {
         });
     }
 
+    async refreshGitInfo() {
+        const cwd = globalStore.get(this.blockCwdAtom);
+        if (!cwd) {
+            globalStore.set(this.gitInfoAtom, null);
+            this.lastGitCwd = "";
+            return;
+        }
+        try {
+            const info = await RpcApi.GetGitInfoCommand(TabRpcClient, cwd);
+            if (this.disposed) return;
+            globalStore.set(this.gitInfoAtom, info ?? null);
+            this.lastGitCwd = cwd;
+        } catch {
+            // non-repo / missing git binary / timeout — just drop the pill
+            if (!this.disposed) {
+                globalStore.set(this.gitInfoAtom, null);
+            }
+        }
+    }
+
     async sendResize(rows: number, cols: number) {
         if (rows <= 0 || cols <= 0) {
             return;
@@ -294,6 +323,10 @@ export class TermBlocksViewModel implements ViewModel {
         if (this.pollTimer != null) {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
+        }
+        if (this.gitPollTimer != null) {
+            clearInterval(this.gitPollTimer);
+            this.gitPollTimer = null;
         }
         for (const unsub of this.unsubs) {
             try {
@@ -660,7 +693,16 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const altOID = useAtomValue(model.altScreenOIDAtom);
     const blockMetaCwd = useAtomValue(model.blockCwdAtom);
     const home = useAtomValue(model.homeAtom);
+    const gitInfo = useAtomValue(model.gitInfoAtom);
     const scrollRef = React.useRef<HTMLDivElement>(null);
+
+    // Refresh git info the moment the block's cwd changes (cd into a repo,
+    // cd out of it).  The 4s poll still covers branch switch / file edits.
+    React.useEffect(() => {
+        if (blockMetaCwd !== "" && blockMetaCwd !== model.lastGitCwd) {
+            model.refreshGitInfo();
+        }
+    }, [blockMetaCwd, model]);
 
     // Only render rows that actually represent a command — a bare "prompt"
     // state is the transient anchor the next OSC C will attach to, with no
@@ -741,7 +783,50 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                 )}
             </div>
             {runningBlock == null && <TermBlocksInput model={model} />}
+            <TermBlocksStatusBar cwd={blockMetaCwd} home={home} gitInfo={gitInfo} />
         </div>
     );
 };
 TermBlocksView.displayName = "TermBlocksView";
+
+const TermBlocksStatusBar: React.FC<{
+    cwd: string;
+    home: string;
+    gitInfo: GitInfoResponse | null;
+}> = ({ cwd, home, gitInfo }) => {
+    const shortCwd = shortenCwd(cwd, home);
+    if (!shortCwd && !gitInfo?.isrepo) {
+        return null;
+    }
+    return (
+        <div className="termblocks-statusbar">
+            {shortCwd && (
+                <span className="termblocks-chip" title={cwd}>
+                    <span className="termblocks-chip-icon">📁</span>
+                    {shortCwd}
+                </span>
+            )}
+            {gitInfo?.isrepo && gitInfo.branch && (
+                <span className="termblocks-chip" title="git branch">
+                    <span className="termblocks-chip-icon"> </span>
+                    {gitInfo.branch}
+                    {gitInfo.ahead ? <span className="termblocks-chip-sub">↑{gitInfo.ahead}</span> : null}
+                    {gitInfo.behind ? <span className="termblocks-chip-sub">↓{gitInfo.behind}</span> : null}
+                </span>
+            )}
+            {gitInfo?.isrepo && (gitInfo.changedfiles ?? 0) > 0 && (
+                <span className="termblocks-chip" title="uncommitted changes">
+                    <span className="termblocks-chip-icon">±</span>
+                    {gitInfo.changedfiles} file{(gitInfo.changedfiles ?? 0) === 1 ? "" : "s"}
+                    {gitInfo.additions ? (
+                        <span className="termblocks-chip-add"> +{gitInfo.additions}</span>
+                    ) : null}
+                    {gitInfo.deletions ? (
+                        <span className="termblocks-chip-del"> -{gitInfo.deletions}</span>
+                    ) : null}
+                </span>
+            )}
+        </div>
+    );
+};
+TermBlocksStatusBar.displayName = "TermBlocksStatusBar";

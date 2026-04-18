@@ -1481,6 +1481,22 @@ func (ws *WshServer) GetCmdBlocksCommand(ctx context.Context, data wshrpc.Comman
 	return cmdblock.GetByBlockID(ctx, data.BlockID, data.Limit)
 }
 
+func (ws *WshServer) GetGitInfoCommand(ctx context.Context, cwd string) (*wshrpc.GitInfoResponse, error) {
+	info, err := cmdblock.LookupGitInfo(ctx, cwd)
+	if err != nil {
+		return nil, err
+	}
+	return &wshrpc.GitInfoResponse{
+		IsRepo:       info.IsRepo,
+		Branch:       info.Branch,
+		ChangedFiles: info.ChangedFiles,
+		Additions:    info.Additions,
+		Deletions:    info.Deletions,
+		Ahead:        info.Ahead,
+		Behind:       info.Behind,
+	}, nil
+}
+
 func (ws *WshServer) ReadBlockFileRangeCommand(ctx context.Context, data wshrpc.CommandReadBlockFileRangeData) (*wshrpc.BlockFileRangeResponse, error) {
 	if data.BlockID == "" {
 		return nil, fmt.Errorf("blockid is required")

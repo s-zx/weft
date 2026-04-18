@@ -1081,6 +1081,17 @@ declare global {
         buildtime: string;
     };
 
+    // wshrpc.GitInfoResponse
+    type GitInfoResponse = {
+        isrepo: boolean;
+        branch?: string;
+        changedfiles?: number;
+        additions?: number;
+        deletions?: number;
+        ahead?: number;
+        behind?: number;
+    };
+
     // waveobj.Job
     type Job = WaveObj & {
         connection: string;

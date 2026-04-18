@@ -438,6 +438,12 @@ export class RpcApiType {
         return client.wshRpcCall("getfullconfig", null, opts);
     }
 
+    // command "getgitinfo" [call]
+    GetGitInfoCommand(client: WshClient, data: string, opts?: RpcOpts): Promise<GitInfoResponse> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "getgitinfo", data, opts);
+        return client.wshRpcCall("getgitinfo", data, opts);
+    }
+
     // command "getjwtpublickey" [call]
     GetJwtPublicKeyCommand(client: WshClient, opts?: RpcOpts): Promise<string> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "getjwtpublickey", null, opts);

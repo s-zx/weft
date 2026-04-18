@@ -437,6 +437,12 @@ func GetFullConfigCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (wconfig.Full
 	return resp, err
 }
 
+// command "getgitinfo", wshserver.GetGitInfoCommand
+func GetGitInfoCommand(w *wshutil.WshRpc, data string, opts *wshrpc.RpcOpts) (*wshrpc.GitInfoResponse, error) {
+	resp, err := sendRpcRequestCallHelper[*wshrpc.GitInfoResponse](w, "getgitinfo", data, opts)
+	return resp, err
+}
+
 // command "getjwtpublickey", wshserver.GetJwtPublicKeyCommand
 func GetJwtPublicKeyCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (string, error) {
 	resp, err := sendRpcRequestCallHelper[string](w, "getjwtpublickey", nil, opts)

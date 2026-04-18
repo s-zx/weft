@@ -100,6 +100,7 @@ type WshRpcInterface interface {
 	GetAllBadgesCommand(ctx context.Context) ([]baseds.BadgeEvent, error)
 	GetCmdBlocksCommand(ctx context.Context, data CommandGetCmdBlocksData) ([]*cbtypes.CmdBlock, error)
 	ReadBlockFileRangeCommand(ctx context.Context, data CommandReadBlockFileRangeData) (*BlockFileRangeResponse, error)
+	GetGitInfoCommand(ctx context.Context, cwd string) (*GitInfoResponse, error)
 
 	// connection functions
 	ConnStatusCommand(ctx context.Context) ([]ConnStatus, error)
@@ -379,6 +380,16 @@ type CommandReadBlockFileRangeData struct {
 type BlockFileRangeResponse struct {
 	Offset int64  `json:"offset"`
 	Data64 string `json:"data64"`
+}
+
+type GitInfoResponse struct {
+	IsRepo       bool   `json:"isrepo"`
+	Branch       string `json:"branch,omitempty"`
+	ChangedFiles int    `json:"changedfiles,omitempty"`
+	Additions    int    `json:"additions,omitempty"`
+	Deletions    int    `json:"deletions,omitempty"`
+	Ahead        int    `json:"ahead,omitempty"`
+	Behind       int    `json:"behind,omitempty"`
 }
 
 type CommandWriteTempFileData struct {

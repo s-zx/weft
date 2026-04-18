@@ -188,6 +188,57 @@
     }
 }
 
+// Bottom status bar: pill-style context chips (cwd / git branch / diff count)
+.termblocks-statusbar {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.3);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: nowrap;
+
+    &:empty {
+        display: none;
+    }
+}
+
+.termblocks-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.75);
+    font-weight: 500;
+    flex: 0 0 auto;
+}
+
+.termblocks-chip-icon {
+    opacity: 0.85;
+    font-size: 10px;
+}
+
+.termblocks-chip-sub {
+    opacity: 0.65;
+    font-size: 10px;
+    margin-left: 2px;
+}
+
+.termblocks-chip-add {
+    color: #4caf50;
+}
+
+.termblocks-chip-del {
+    color: #e57373;
+}
+
 // Alt-screen takeover
 .termblocks-altscreen-wrap {
     flex: 1 1 auto;

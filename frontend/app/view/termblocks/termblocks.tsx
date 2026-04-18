@@ -1,7 +1,6 @@
 // Copyright 2026, s-zx
 // SPDX-License-Identifier: Apache-2.0
 
-import * as WOS from "@/app/store/wos";
 import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
@@ -29,7 +28,7 @@ export class TermBlocksViewModel implements ViewModel {
     viewIcon = jotai.atom<string>("list");
     viewName = jotai.atom<string>("Blocks");
     noPadding = jotai.atom<boolean>(true);
-    viewText: jotai.Atom<HeaderElem[]>;
+    noHeader = jotai.atom<boolean>(true);
 
     blocksAtom: jotai.PrimitiveAtom<CmdBlock[]>;
     outputCacheAtom: jotai.PrimitiveAtom<Record<string, Uint8Array>>;
@@ -77,16 +76,6 @@ export class TermBlocksViewModel implements ViewModel {
         this.minVisibleSeqAtom = jotai.atom<number>(0) as jotai.PrimitiveAtom<number>;
         this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
         this.loadShellHistory();
-
-        this.viewText = jotai.atom<HeaderElem[]>([
-            {
-                elemtype: "textbutton",
-                text: "Back to Terminal",
-                className: "grey !py-[2px] !px-[10px] text-[11px] font-[500]",
-                title: "Switch this block's view back to the standard terminal",
-                onClick: () => this.switchToTerminal(),
-            },
-        ]);
 
         // Ask wavesrv to (re)start the shell controller bound to this block.
         // The term view does the same thing via termwrap.resyncController; we
@@ -233,13 +222,6 @@ export class TermBlocksViewModel implements ViewModel {
 
     get viewComponent(): ViewComponent {
         return TermBlocksView;
-    }
-
-    async switchToTerminal() {
-        await RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("block", this.blockId),
-            meta: { view: "term" },
-        });
     }
 
     async sendBytes(bytes: string) {
@@ -972,11 +954,6 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                 {error && <div className="termblocks-empty termblocks-error">Error: {error}</div>}
                 {!error && loading && visibleBlocks.length === 0 && (
                     <div className="termblocks-empty">Loading…</div>
-                )}
-                {!error && !loading && visibleBlocks.length === 0 && (
-                    <div className="termblocks-empty">
-                        No commands yet on this block. Type below to run one.
-                    </div>
                 )}
                 {visibleBlocks.length > 0 && (
                     <div className="termblocks-container">

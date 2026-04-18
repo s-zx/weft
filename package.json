@@ -1,16 +1,16 @@
 {
-    "name": "waveterm",
+    "name": "weft",
     "author": {
-        "name": "Command Line Inc",
-        "email": "info@commandline.dev"
+        "name": "s-zx",
+        "email": "72348999+s-zx@users.noreply.github.com"
     },
-    "productName": "Wave",
-    "description": "Open-Source AI-Native Terminal Built for Seamless Workflows",
+    "productName": "Weft",
+    "description": "AI-Native Terminal",
     "license": "Apache-2.0",
     "version": "0.14.5",
-    "homepage": "https://waveterm.dev",
+    "homepage": "https://github.com/s-zx/waveterm",
     "build": {
-        "appId": "dev.commandline.waveterm"
+        "appId": "dev.s-zx.weft"
     },
     "private": true,
     "main": "./dist/main/index.js",

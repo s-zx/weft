@@ -23,9 +23,11 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/wavebase"
 )
 
-const WCloudEndpoint = "https://api.waveterm.dev/central"
+// Weft: telemetry is disabled by default. Leaving these endpoints empty means
+// no remote call is attempted even if a user flips `telemetry:enabled` back on.
+const WCloudEndpoint = ""
 const WCloudEndpointVarName = "WCLOUD_ENDPOINT"
-const WCloudPingEndpoint = "https://ping.waveterm.dev/central"
+const WCloudPingEndpoint = ""
 const WCloudPingEndpointVarName = "WCLOUD_PING_ENDPOINT"
 
 var WCloudEndpoint_VarCache string
@@ -65,7 +67,11 @@ func checkEndpointVar(endpoint string, debugName string, varName string) error {
 	if !wavebase.IsDevMode() {
 		return nil
 	}
-	if endpoint == "" || !strings.HasPrefix(endpoint, "https://") {
+	// Empty endpoint in dev means telemetry is disabled for this build.
+	if endpoint == "" {
+		return nil
+	}
+	if !strings.HasPrefix(endpoint, "https://") {
 		return fmt.Errorf("invalid %s, %s not set or invalid", debugName, varName)
 	}
 	return nil

@@ -178,8 +178,8 @@ export function VTab({
                 <div
                     className={cn(
                         "pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-[8px]",
-                        "border border-white/10",
-                        "bg-white/[0.04]"
+                        "border border-white/25",
+                        "bg-white/[0.06]"
                     )}
                 />
             )}

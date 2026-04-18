@@ -5,7 +5,7 @@ import * as WOS from "@/app/store/wos";
 import { globalStore } from "@/app/store/jotaiStore";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { base64ToString, cn } from "@/util/util";
+import { base64ToString, cn, stringToBase64 } from "@/util/util";
 import * as jotai from "jotai";
 import { useAtomValue } from "jotai";
 import * as React from "react";
@@ -72,6 +72,15 @@ export class TermBlocksViewModel implements ViewModel {
             oref: WOS.makeORef("block", this.blockId),
             meta: { view: "term" },
         });
+    }
+
+    async submitInput(raw: string) {
+        const line = raw + "\r";
+        await RpcApi.ControllerInputCommand(TabRpcClient, {
+            blockid: this.blockId,
+            inputdata64: stringToBase64(line),
+        });
+        this.fetchBlocks();
     }
 
     async fetchBlocks() {
@@ -183,34 +192,115 @@ const TermBlockRow: React.FC<{ block: CmdBlock; output: string | undefined }> = 
 };
 TermBlockRow.displayName = "TermBlockRow";
 
+const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
+    const inputRef = React.useRef<HTMLInputElement>(null);
+    const historyRef = React.useRef<string[]>([]);
+    const historyIdxRef = React.useRef<number>(-1);
+    const [value, setValue] = React.useState("");
+
+    const submit = () => {
+        const line = value;
+        if (line.length === 0) {
+            return;
+        }
+        historyRef.current.push(line);
+        historyIdxRef.current = historyRef.current.length;
+        setValue("");
+        model.submitInput(line);
+    };
+
+    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+            return;
+        }
+        if (e.key === "ArrowUp") {
+            if (historyRef.current.length === 0) return;
+            e.preventDefault();
+            historyIdxRef.current = Math.max(0, historyIdxRef.current - 1);
+            setValue(historyRef.current[historyIdxRef.current] ?? "");
+            return;
+        }
+        if (e.key === "ArrowDown") {
+            if (historyRef.current.length === 0) return;
+            e.preventDefault();
+            const next = historyIdxRef.current + 1;
+            if (next >= historyRef.current.length) {
+                historyIdxRef.current = historyRef.current.length;
+                setValue("");
+            } else {
+                historyIdxRef.current = next;
+                setValue(historyRef.current[next]);
+            }
+        }
+    };
+
+    return (
+        <div className="termblocks-input-row">
+            <span className="termblocks-input-prompt">›</span>
+            <input
+                ref={inputRef}
+                className="termblocks-input"
+                type="text"
+                value={value}
+                autoFocus
+                spellCheck={false}
+                autoComplete="off"
+                placeholder="Type a command and press Enter…"
+                onChange={(e) => setValue(e.target.value)}
+                onKeyDown={onKeyDown}
+            />
+        </div>
+    );
+};
+TermBlocksInput.displayName = "TermBlocksInput";
+
 export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> = ({ model }) => {
     const blocks = useAtomValue(model.blocksAtom);
     const outputs = useAtomValue(model.outputCacheAtom);
     const loading = useAtomValue(model.loadingAtom);
     const error = useAtomValue(model.errorAtom);
+    const scrollRef = React.useRef<HTMLDivElement>(null);
 
-    if (error) {
-        return <div className="termblocks-empty termblocks-error">Error: {error}</div>;
-    }
-    if (loading && blocks.length === 0) {
-        return <div className="termblocks-empty">Loading…</div>;
-    }
-    if (blocks.length === 0) {
-        return (
-            <div className="termblocks-empty">
-                No commands recorded yet on this block. Switch to Terminal view, run a command, then come back.
-            </div>
-        );
-    }
+    // Only render rows that actually represent a command — a bare "prompt"
+    // state is the transient anchor the next OSC C will attach to, with no
+    // user-meaningful content yet.
+    const visibleBlocks = React.useMemo(() => blocks.filter((b) => b.state !== "prompt"), [blocks]);
+    const lastKey =
+        visibleBlocks.length > 0 ? `${visibleBlocks[visibleBlocks.length - 1].oid}:${visibleBlocks.length}` : "";
+
+    React.useEffect(() => {
+        const el = scrollRef.current;
+        if (el == null) return;
+        el.scrollTop = el.scrollHeight;
+    }, [lastKey]);
 
     return (
-        <div className="termblocks-container">
-            <div className="termblocks-header">
-                {blocks.length} command{blocks.length === 1 ? "" : "s"} · block {model.blockId.slice(0, 8)}
+        <div className="termblocks-root">
+            <div className="termblocks-scroll" ref={scrollRef}>
+                {error && <div className="termblocks-empty termblocks-error">Error: {error}</div>}
+                {!error && loading && visibleBlocks.length === 0 && (
+                    <div className="termblocks-empty">Loading…</div>
+                )}
+                {!error && !loading && visibleBlocks.length === 0 && (
+                    <div className="termblocks-empty">
+                        No commands yet on this block. Type below to run one.
+                    </div>
+                )}
+                {visibleBlocks.length > 0 && (
+                    <div className="termblocks-container">
+                        <div className="termblocks-header">
+                            {visibleBlocks.length} command{visibleBlocks.length === 1 ? "" : "s"} · block{" "}
+                            {model.blockId.slice(0, 8)}
+                        </div>
+                        {visibleBlocks.map((cb) => (
+                            <TermBlockRow key={cb.oid} block={cb} output={outputs[cb.oid]} />
+                        ))}
+                    </div>
+                )}
             </div>
-            {blocks.map((cb) => (
-                <TermBlockRow key={cb.oid} block={cb} output={outputs[cb.oid]} />
-            ))}
+            <TermBlocksInput model={model} />
         </div>
     );
 };

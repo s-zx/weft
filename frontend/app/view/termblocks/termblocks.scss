@@ -1,12 +1,57 @@
+.termblocks-root {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
+}
+
+.termblocks-scroll {
+    flex: 1 1 auto;
+    overflow-y: auto;
+    min-height: 0;
+}
+
 .termblocks-container {
     display: flex;
     flex-direction: column;
     gap: 8px;
     padding: 12px;
-    overflow-y: auto;
-    height: 100%;
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 12px;
+}
+
+.termblocks-input-row {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-top: 1px solid var(--border);
+    background: rgba(0, 0, 0, 0.3);
+}
+
+.termblocks-input-prompt {
+    color: var(--accent);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-weight: 600;
+    font-size: 14px;
+    opacity: 0.8;
+}
+
+.termblocks-input {
+    flex: 1 1 auto;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--foreground);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    padding: 4px 0;
+
+    &::placeholder {
+        color: var(--secondary-text);
+        opacity: 0.5;
+    }
 }
 
 .termblocks-header {

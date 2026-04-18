@@ -17,7 +17,7 @@
     "conn:askbeforewshinstall": true,
     "conn:wshenabled": true,
     "editor:minimapenabled": true,
-    "web:defaulturl": "https://github.com/s-zx/waveterm",
+    "web:defaulturl": "https://github.com/s-zx/weft",
     "web:defaultsearch": "https://www.google.com/search?q={query}",
     "window:tilegapsize": 3,
     "window:maxtabcachesize": 10,

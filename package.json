@@ -8,7 +8,7 @@
     "description": "AI-Native Terminal",
     "license": "Apache-2.0",
     "version": "0.14.5",
-    "homepage": "https://github.com/s-zx/waveterm",
+    "homepage": "https://github.com/s-zx/weft",
     "build": {
         "appId": "dev.s-zx.weft"
     },

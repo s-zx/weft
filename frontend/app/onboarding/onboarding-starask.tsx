@@ -28,7 +28,7 @@ export function StarAskPage({ onClose, page = "upgrade" }: StarAskPageProps) {
             oref: WOS.makeORef("client", clientId),
             meta: { "onboarding:githubstar": true },
         });
-        window.open(`https://github.com/wavetermdev/waveterm?ref=${page}`, "_blank");
+        window.open(`https://github.com/s-zx/weft?ref=${page}`, "_blank");
         onClose();
     };
 
@@ -58,7 +58,7 @@ export function StarAskPage({ onClose, page = "upgrade" }: StarAskPageProps) {
             },
             { noresponse: true }
         );
-        window.open("https://github.com/wavetermdev/waveterm", "_blank");
+        window.open("https://github.com/s-zx/weft", "_blank");
     };
 
     const handleMaybeLater = async () => {

@@ -211,8 +211,22 @@ class WorkspaceLayoutModel {
         if (!this.outerPanelGroupRef || !this.innerPanelGroupRef) return;
         const { outer, inner } = this.computeLayout(windowWidth);
         this.inResize = true;
-        this.outerPanelGroupRef.setLayout(outer);
-        this.innerPanelGroupRef.setLayout(inner);
+        // react-resizable-panels throws if the sizes array length doesn't
+        // match the current number of visible Panel children. During HMR
+        // or the first frame after toggling vtab/aipanel visibility the
+        // refs can briefly point to a group with 0 or 1 panels while we
+        // still pass 2 sizes. Swallow the validation error instead of
+        // surfacing it as an uncaught exception.
+        try {
+            this.outerPanelGroupRef.setLayout(outer);
+        } catch (e) {
+            // ignore transient layout mismatch
+        }
+        try {
+            this.innerPanelGroupRef.setLayout(inner);
+        } catch (e) {
+            // ignore transient layout mismatch
+        }
         this.inResize = false;
         this.updateWrapperWidth();
     }

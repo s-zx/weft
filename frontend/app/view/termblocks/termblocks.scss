@@ -185,10 +185,11 @@
     font-size: 11px;
     overflow-x: auto;
     white-space: nowrap;
-
-    &:empty {
-        display: none;
-    }
+    // Always reserve the row so chips can appear/disappear without the
+    // whole content area reflowing; the old `&:empty { display: none }`
+    // rule caused a full-page flicker on new tabs whenever git info or
+    // cwd arrived.
+    min-height: 26px;
 }
 
 .termblocks-chip {

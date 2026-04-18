@@ -34,6 +34,8 @@ const (
 	Event_AIModeConfig        = "waveai:modeconfig"    // type: wconfig.AIModeConfigUpdate
 	Event_BlockJobStatus      = "block:jobstatus"      // type: wshrpc.BlockJobStatusData
 	Event_Badge               = "badge"                // type: baseds.BadgeEvent
+	Event_CmdBlockRow         = "cmdblock:row"         // type: *cbtypes.CmdBlock
+	Event_CmdBlockChunk       = "cmdblock:chunk"       // type: *cbtypes.CmdBlockChunkEvent
 )
 
 var AllEvents []string = []string{
@@ -56,6 +58,8 @@ var AllEvents []string = []string{
 	Event_AIModeConfig,
 	Event_BlockJobStatus,
 	Event_Badge,
+	Event_CmdBlockRow,
+	Event_CmdBlockChunk,
 }
 
 type WaveEvent struct {

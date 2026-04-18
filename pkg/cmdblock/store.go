@@ -144,6 +144,24 @@ func LatestForBlock(ctx context.Context, blockID string) (*CmdBlock, error) {
 	return &cb, nil
 }
 
+// getByOID loads a single row by oid. Returns (nil, nil) if not found so
+// callers can publish "deleted" semantics without surfacing an error.
+func getByOID(ctx context.Context, oid string) (*CmdBlock, error) {
+	var cb CmdBlock
+	var found bool
+	err := wstore.WithTx(ctx, func(tx *wstore.TxWrap) error {
+		found = tx.Get(&cb, `SELECT * FROM db_cmdblock WHERE oid = ?`, oid)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, nil
+	}
+	return &cb, nil
+}
+
 // DeleteByBlockID removes all cmd_blocks belonging to a parent terminal block.
 // Called when the parent block is deleted.
 func DeleteByBlockID(ctx context.Context, blockID string) error {

@@ -15,6 +15,18 @@ const (
 	StateDone    = "done"
 )
 
+// CmdBlockChunkEvent is published on cmdblock:chunk while a cmdblock row is
+// in the "running" state. Data64 is a base64-encoded slice of PTY bytes that
+// landed in the parent blockfile starting at Offset. Includes OSC 16162
+// sequences; consumers can either strip or pass through to xterm (which will
+// treat unknown OSC numbers as a no-op).
+type CmdBlockChunkEvent struct {
+	BlockID string `json:"blockid"`
+	OID     string `json:"oid"`
+	Offset  int64  `json:"offset"`
+	Data64  string `json:"data64"`
+}
+
 // CmdBlock is one shell-command lifecycle tracked inside a terminal block.
 //
 // Each row covers the span from OSC 16162;A (prompt appeared) to OSC 16162;D

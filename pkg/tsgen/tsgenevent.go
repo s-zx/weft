@@ -12,6 +12,7 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
 	"github.com/wavetermdev/waveterm/pkg/baseds"
 	"github.com/wavetermdev/waveterm/pkg/blockcontroller"
+	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
 	"github.com/wavetermdev/waveterm/pkg/userinput"
 	"github.com/wavetermdev/waveterm/pkg/waveobj"
 	"github.com/wavetermdev/waveterm/pkg/wconfig"
@@ -41,6 +42,8 @@ var WaveEventDataTypes = map[string]reflect.Type{
 	wps.Event_AIModeConfig:        reflect.TypeOf(wconfig.AIModeConfigUpdate{}),
 	wps.Event_BlockJobStatus:      reflect.TypeOf(wshrpc.BlockJobStatusData{}),
 	wps.Event_Badge:               reflect.TypeOf(baseds.BadgeEvent{}),
+	wps.Event_CmdBlockRow:         reflect.TypeOf((*cbtypes.CmdBlock)(nil)),
+	wps.Event_CmdBlockChunk:       reflect.TypeOf((*cbtypes.CmdBlockChunkEvent)(nil)),
 }
 
 func getWaveEventDataTSType(eventName string, tsTypesMap map[reflect.Type]string) string {

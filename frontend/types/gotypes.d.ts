@@ -254,6 +254,14 @@ declare global {
         createdat: number;
     };
 
+    // cbtypes.CmdBlockChunkEvent
+    type CmdBlockChunkEvent = {
+        blockid: string;
+        oid: string;
+        offset: number;
+        data64: string;
+    };
+
     // wshrpc.CommandAuthenticateJobManagerData
     type CommandAuthenticateJobManagerData = {
         jobid: string;

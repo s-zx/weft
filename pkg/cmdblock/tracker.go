@@ -9,17 +9,22 @@ import (
 	"encoding/json"
 	"log"
 	"sync"
+
+	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
+	"github.com/wavetermdev/waveterm/pkg/wps"
 )
 
 // Tracker glues the OSC 16162 parser to the cmdblock store for one shell
 // session.  Hook it into a PTY read loop by calling OnBytes each time a chunk
-// is appended to the parent blockfile: Tracker translates A/C/D/M events into
-// MakePromptStarted / MarkCommandSubmitted / MarkCommandDone calls.
+// is appended to the parent blockfile: Tracker translates A/C/D events into
+// MakePromptStarted / MarkCommandSubmitted / MarkCommandDone calls and
+// publishes cmdblock:row + cmdblock:chunk events for live updates.
 type Tracker struct {
 	mu         sync.Mutex
 	blockID    string
 	parser     *Parser
 	currentOID string
+	state      string // matches the current row's state ("prompt"/"running"/"")
 	shellType  string
 }
 
@@ -31,14 +36,20 @@ func MakeTracker(blockID string) *Tracker {
 }
 
 // OnBytes must be called with every PTY chunk in the order it lands in the
-// parent blockfile, AFTER the chunk has been appended.  The parser maintains
+// parent blockfile, AFTER the chunk has been appended. The parser maintains
 // absolute offsets relative to the first byte fed; those offsets are recorded
-// verbatim into the cmdblock rows.
+// verbatim into the cmdblock rows and also used as the "offset" for chunk
+// events so the frontend can line them up against the blockfile.
 func (t *Tracker) OnBytes(ctx context.Context, chunk []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, ev := range t.parser.Feed(chunk) {
+	chunkStart := t.parser.Offset()
+	events := t.parser.Feed(chunk)
+	for _, ev := range events {
 		t.handleEvent(ctx, ev)
+	}
+	if t.state == StateRunning && t.currentOID != "" && len(chunk) > 0 {
+		t.publishChunk(t.currentOID, chunkStart, chunk)
 	}
 }
 
@@ -51,6 +62,8 @@ func (t *Tracker) handleEvent(ctx context.Context, ev Event) {
 			return
 		}
 		t.currentOID = cb.OID
+		t.state = StatePrompt
+		t.publishRow(cb)
 	case "C":
 		if t.currentOID == "" {
 			return
@@ -59,21 +72,56 @@ func (t *Tracker) handleEvent(ctx context.Context, ev Event) {
 		outputStart := ev.Offset + int64(ev.SeqLen)
 		if err := MarkCommandSubmitted(ctx, t.currentOID, cmd, "", ev.Offset, outputStart, ""); err != nil {
 			log.Printf("cmdblock: MarkCommandSubmitted oid=%s: %v", t.currentOID, err)
+			return
+		}
+		t.state = StateRunning
+		if row, err := getByOID(ctx, t.currentOID); err == nil && row != nil {
+			t.publishRow(row)
 		}
 	case "D":
 		if t.currentOID == "" {
 			return
 		}
+		oid := t.currentOID
 		exit := decodeExitCode(ev.Payload)
-		if err := MarkCommandDone(ctx, t.currentOID, exit, ev.Offset); err != nil {
-			log.Printf("cmdblock: MarkCommandDone oid=%s: %v", t.currentOID, err)
+		if err := MarkCommandDone(ctx, oid, exit, ev.Offset); err != nil {
+			log.Printf("cmdblock: MarkCommandDone oid=%s: %v", oid, err)
+		}
+		// MarkCommandDone may have DELETEd the row (empty-Enter case); the
+		// publish below degrades gracefully when getByOID returns nil.
+		if row, err := getByOID(ctx, oid); err == nil {
+			if row != nil {
+				t.publishRow(row)
+			}
 		}
 		t.currentOID = ""
+		t.state = ""
 	case "M":
 		if shell := decodeShell(ev.Payload); shell != "" {
 			t.shellType = shell
 		}
 	}
+}
+
+func (t *Tracker) publishRow(cb *cbtypes.CmdBlock) {
+	wps.Broker.Publish(wps.WaveEvent{
+		Event:  wps.Event_CmdBlockRow,
+		Scopes: []string{"block:" + t.blockID},
+		Data:   cb,
+	})
+}
+
+func (t *Tracker) publishChunk(oid string, offset int64, data []byte) {
+	wps.Broker.Publish(wps.WaveEvent{
+		Event:  wps.Event_CmdBlockChunk,
+		Scopes: []string{"block:" + t.blockID},
+		Data: &cbtypes.CmdBlockChunkEvent{
+			BlockID: t.blockID,
+			OID:     oid,
+			Offset:  offset,
+			Data64:  base64.StdEncoding.EncodeToString(data),
+		},
+	})
 }
 
 func decodeCmd64(payload string) string {

@@ -3,22 +3,22 @@
 
 import * as WOS from "@/app/store/wos";
 import { globalStore } from "@/app/store/jotaiStore";
+import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
-import { base64ToString, cn, stringToBase64 } from "@/util/util";
+import { base64ToArray, cn, stringToBase64 } from "@/util/util";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
 import * as jotai from "jotai";
 import { useAtomValue } from "jotai";
 import * as React from "react";
+import "@xterm/xterm/css/xterm.css";
 import "./termblocks.scss";
 
-const PollIntervalMs = 1500;
+const PollIntervalMs = 10_000; // safety net; live updates arrive via wps events
 const MaxRenderedBytesPerBlock = 256 * 1024;
-const AnsiCsiRe = /\x1b\[[0-9;?]*[ -/]*[@-~]/g;
-const AnsiOscRe = /\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g;
-
-function stripAnsi(s: string): string {
-    return s.replace(AnsiOscRe, "").replace(AnsiCsiRe, "");
-}
+const MaxXtermRows = 40;
+const MinXtermRows = 3;
 
 export class TermBlocksViewModel implements ViewModel {
     viewType: string;
@@ -30,18 +30,21 @@ export class TermBlocksViewModel implements ViewModel {
     viewText: jotai.Atom<HeaderElem[]>;
 
     blocksAtom: jotai.PrimitiveAtom<CmdBlock[]>;
-    outputCacheAtom: jotai.PrimitiveAtom<Record<string, string>>;
+    outputCacheAtom: jotai.PrimitiveAtom<Record<string, Uint8Array>>;
     loadingAtom: jotai.PrimitiveAtom<boolean>;
     errorAtom: jotai.PrimitiveAtom<string>;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
+    unsubs: (() => void)[] = [];
 
     constructor({ blockId }: ViewModelInitType) {
         this.viewType = "termblocks";
         this.blockId = blockId;
         this.blocksAtom = jotai.atom<CmdBlock[]>([]) as jotai.PrimitiveAtom<CmdBlock[]>;
-        this.outputCacheAtom = jotai.atom<Record<string, string>>({}) as jotai.PrimitiveAtom<Record<string, string>>;
+        this.outputCacheAtom = jotai.atom<Record<string, Uint8Array>>({}) as jotai.PrimitiveAtom<
+            Record<string, Uint8Array>
+        >;
         this.loadingAtom = jotai.atom<boolean>(true);
         this.errorAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
 
@@ -61,6 +64,84 @@ export class TermBlocksViewModel implements ViewModel {
                 this.fetchBlocks();
             }
         }, PollIntervalMs);
+
+        const scope = `block:${blockId}`;
+        this.unsubs.push(
+            waveEventSubscribeSingle({
+                eventType: "cmdblock:row",
+                scope,
+                handler: (ev) => {
+                    const row = ev.data as CmdBlock | undefined;
+                    if (row != null) {
+                        this.applyRow(row);
+                    }
+                },
+            })
+        );
+        this.unsubs.push(
+            waveEventSubscribeSingle({
+                eventType: "cmdblock:chunk",
+                scope,
+                handler: (ev) => {
+                    const chunk = ev.data as CmdBlockChunkEvent | undefined;
+                    if (chunk != null) {
+                        this.applyChunk(chunk);
+                    }
+                },
+            })
+        );
+    }
+
+    applyRow(row: CmdBlock) {
+        if (this.disposed) {
+            return;
+        }
+        const current = globalStore.get(this.blocksAtom);
+        const idx = current.findIndex((b) => b.oid === row.oid);
+        let next: CmdBlock[];
+        if (idx >= 0) {
+            next = current.slice();
+            next[idx] = row;
+        } else {
+            next = [...current, row].sort((a, b) => a.seq - b.seq);
+        }
+        globalStore.set(this.blocksAtom, next);
+        globalStore.set(this.loadingAtom, false);
+
+        // When a block transitions to "done", fetch the final output range so
+        // xterm renders the frozen result. During "running" we've been
+        // appending via chunk events, so the cached buffer should already
+        // cover the output.
+        if (
+            row.state === "done" &&
+            row.outputstartoffset != null &&
+            row.outputendoffset != null
+        ) {
+            const cache = globalStore.get(this.outputCacheAtom);
+            const existing = cache[row.oid];
+            const expected = row.outputendoffset - row.outputstartoffset;
+            if (existing == null || existing.length < expected) {
+                this.fetchOutputFor(row);
+            }
+        }
+    }
+
+    applyChunk(chunk: CmdBlockChunkEvent) {
+        if (this.disposed) {
+            return;
+        }
+        const bytes = base64ToArray(chunk.data64);
+        const cache = globalStore.get(this.outputCacheAtom);
+        const current = cache[chunk.oid];
+        let merged: Uint8Array;
+        if (current == null) {
+            merged = bytes;
+        } else {
+            merged = new Uint8Array(current.length + bytes.length);
+            merged.set(current, 0);
+            merged.set(bytes, current.length);
+        }
+        globalStore.set(this.outputCacheAtom, { ...cache, [chunk.oid]: merged });
     }
 
     get viewComponent(): ViewComponent {
@@ -136,11 +217,8 @@ export class TermBlocksViewModel implements ViewModel {
             if (this.disposed) {
                 return;
             }
-            let text = base64ToString(resp.data64);
-            if (rawSize > MaxRenderedBytesPerBlock) {
-                text += `\n\n[… truncated, ${rawSize - size} more bytes]`;
-            }
-            const cache = { ...globalStore.get(this.outputCacheAtom), [block.oid]: text };
+            const bytes = base64ToArray(resp.data64);
+            const cache = { ...globalStore.get(this.outputCacheAtom), [block.oid]: bytes };
             globalStore.set(this.outputCacheAtom, cache);
         } catch (e) {
             console.warn("termblocks: fetchOutputFor failed", block.oid, e);
@@ -153,14 +231,102 @@ export class TermBlocksViewModel implements ViewModel {
             clearInterval(this.pollTimer);
             this.pollTimer = null;
         }
+        for (const unsub of this.unsubs) {
+            try {
+                unsub();
+            } catch {
+                // ignore
+            }
+        }
+        this.unsubs = [];
     }
 }
 
-const TermBlockRow: React.FC<{ block: CmdBlock; output: string | undefined }> = ({ block, output }) => {
+function countNewlines(bytes: Uint8Array): number {
+    let n = 0;
+    for (let i = 0; i < bytes.length; i++) {
+        if (bytes[i] === 0x0a) {
+            n++;
+        }
+    }
+    return n;
+}
+
+const XtermOutput: React.FC<{ bytes: Uint8Array }> = ({ bytes }) => {
+    const containerRef = React.useRef<HTMLDivElement>(null);
+    const termRef = React.useRef<Terminal | null>(null);
+    const fitRef = React.useRef<FitAddon | null>(null);
+    const writtenRef = React.useRef<number>(0);
+
+    React.useEffect(() => {
+        const host = containerRef.current;
+        if (host == null) return;
+        const term = new Terminal({
+            cols: 120,
+            rows: MinXtermRows,
+            disableStdin: true,
+            convertEol: true,
+            cursorBlink: false,
+            scrollback: 0,
+            fontFamily: "ui-monospace, Menlo, Consolas, monospace",
+            fontSize: 12,
+            theme: {
+                background: "#1a1a1a",
+                foreground: "#e0e0e0",
+            },
+        });
+        const fit = new FitAddon();
+        term.loadAddon(fit);
+        term.open(host);
+        try {
+            fit.fit();
+        } catch {
+            // container has zero width on first paint — defaults are fine
+        }
+        termRef.current = term;
+        fitRef.current = fit;
+        writtenRef.current = 0;
+        return () => {
+            term.dispose();
+            termRef.current = null;
+            fitRef.current = null;
+        };
+    }, []);
+
+    React.useEffect(() => {
+        const term = termRef.current;
+        if (term == null) return;
+        const wantRows = Math.min(MaxXtermRows, Math.max(MinXtermRows, countNewlines(bytes) + 1));
+        if (term.rows !== wantRows) {
+            try {
+                term.resize(term.cols, wantRows);
+            } catch {
+                // ignore
+            }
+        }
+        const written = writtenRef.current;
+        if (bytes.length === written) {
+            return;
+        }
+        if (bytes.length < written) {
+            term.reset();
+            term.write(bytes);
+        } else if (written === 0) {
+            term.write(bytes);
+        } else {
+            term.write(bytes.subarray(written));
+        }
+        writtenRef.current = bytes.length;
+    }, [bytes]);
+
+    return <div className="termblocks-xterm" ref={containerRef} />;
+};
+XtermOutput.displayName = "XtermOutput";
+
+const TermBlockRow: React.FC<{ block: CmdBlock; output: Uint8Array | undefined }> = ({ block, output }) => {
     const isDone = block.state === "done";
     const isError = isDone && block.exitcode != null && block.exitcode !== 0;
-    const cleanedOutput = output != null ? stripAnsi(output).replace(/\r\n/g, "\n").replace(/\r/g, "\n") : null;
-    const hasOutput = cleanedOutput != null && cleanedOutput.length > 0;
+    const hasOutput = output != null && output.length > 0;
 
     return (
         <div className={cn("termblocks-row", `termblocks-row-${block.state}`, isError && "termblocks-row-error")}>
@@ -180,7 +346,7 @@ const TermBlockRow: React.FC<{ block: CmdBlock; output: string | undefined }> = 
                     <em className="termblocks-placeholder">(waiting for command)</em>
                 )}
             </div>
-            {hasOutput && <pre className="termblocks-row-output">{cleanedOutput}</pre>}
+            {hasOutput && <XtermOutput bytes={output} />}
             <div className="termblocks-row-offsets">
                 prompt@{block.promptoffset}
                 {block.cmdoffset != null && ` • cmd@${block.cmdoffset}`}
@@ -267,14 +433,28 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     // state is the transient anchor the next OSC C will attach to, with no
     // user-meaningful content yet.
     const visibleBlocks = React.useMemo(() => blocks.filter((b) => b.state !== "prompt"), [blocks]);
-    const lastKey =
-        visibleBlocks.length > 0 ? `${visibleBlocks[visibleBlocks.length - 1].oid}:${visibleBlocks.length}` : "";
+    const lastOid = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1].oid : "";
+    const lastOutputLen = lastOid && outputs[lastOid] != null ? outputs[lastOid].length : 0;
 
+    // Scroll to the bottom whenever the last visible block changes OR its
+    // output bytes arrive.  xterm itself lays out across a couple of frames,
+    // so we trigger a deferred scroll in addition to the immediate one.
     React.useEffect(() => {
         const el = scrollRef.current;
         if (el == null) return;
-        el.scrollTop = el.scrollHeight;
-    }, [lastKey]);
+        const toBottom = () => {
+            el.scrollTop = el.scrollHeight;
+        };
+        toBottom();
+        const raf1 = requestAnimationFrame(toBottom);
+        const raf2 = requestAnimationFrame(() => requestAnimationFrame(toBottom));
+        const late = setTimeout(toBottom, 120);
+        return () => {
+            cancelAnimationFrame(raf1);
+            cancelAnimationFrame(raf2);
+            clearTimeout(late);
+        };
+    }, [lastOid, lastOutputLen, visibleBlocks.length]);
 
     return (
         <div className="termblocks-root">

@@ -150,6 +150,18 @@
     overflow-y: auto;
 }
 
+.termblocks-xterm {
+    background: #1a1a1a;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin: 4px 0 6px;
+    overflow: hidden;
+
+    .xterm {
+        height: auto;
+    }
+}
+
 .termblocks-placeholder {
     color: var(--secondary-text);
     font-style: italic;

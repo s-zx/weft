@@ -34,6 +34,9 @@ type Tracker struct {
 }
 
 func MakeTracker(blockID string) *Tracker {
+	if err := MarkRunningAsInterrupted(context.Background(), blockID); err != nil {
+		log.Printf("cmdblock: MarkRunningAsInterrupted blockid=%s: %v", blockID, err)
+	}
 	return &Tracker{
 		blockID: blockID,
 		parser:  MakeParser(),

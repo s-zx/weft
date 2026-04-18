@@ -38,6 +38,7 @@ export class TermBlocksViewModel implements ViewModel {
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
     unsubs: (() => void)[] = [];
+    inputRef: React.RefObject<HTMLInputElement | null> = React.createRef();
 
     constructor({ blockId }: ViewModelInitType) {
         this.viewType = "termblocks";
@@ -253,6 +254,15 @@ export class TermBlocksViewModel implements ViewModel {
         } catch (e) {
             console.warn("termblocks: fetchOutputFor failed", block.oid, e);
         }
+    }
+
+    giveFocus(): boolean {
+        const el = this.inputRef.current;
+        if (el == null) {
+            return false;
+        }
+        el.focus();
+        return document.activeElement === el;
     }
 
     dispose() {
@@ -531,7 +541,7 @@ const TermBlockRow: React.FC<{
 TermBlockRow.displayName = "TermBlockRow";
 
 const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
-    const inputRef = React.useRef<HTMLInputElement>(null);
+    const inputRef = model.inputRef;
     const historyRef = React.useRef<string[]>([]);
     const historyIdxRef = React.useRef<number>(-1);
     const [value, setValue] = React.useState("");

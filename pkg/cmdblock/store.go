@@ -144,6 +144,21 @@ func LatestForBlock(ctx context.Context, blockID string) (*CmdBlock, error) {
 	return &cb, nil
 }
 
+// MarkRunningAsInterrupted flips any rows left in StateRunning for this
+// parent block into StateDone with exit_code -2. Used when a shell
+// (re)starts: such rows are certainly stale (the process they referenced
+// no longer exists), and if we left them running the frontend would hide
+// its input row forever waiting for a D that will never arrive.
+func MarkRunningAsInterrupted(ctx context.Context, blockID string) error {
+	return wstore.WithTx(ctx, func(tx *wstore.TxWrap) error {
+		tx.Exec(`UPDATE db_cmdblock
+			SET state = ?, exit_code = ?, ts_done_ns = ?
+			WHERE blockid = ? AND state = ?`,
+			StateDone, int64(-2), time.Now().UnixNano(), blockID, StateRunning)
+		return nil
+	})
+}
+
 // getByOID loads a single row by oid. Returns (nil, nil) if not found so
 // callers can publish "deleted" semantics without surfacing an error.
 func getByOID(ctx context.Context, oid string) (*CmdBlock, error) {

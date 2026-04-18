@@ -245,7 +245,7 @@ export function VTab({
             {onClose && (
                 <div
                     className={cn(
-                        "absolute top-1/2 right-2 -translate-y-1/2 flex items-center gap-[2px] transition",
+                        "absolute top-[6px] right-[8px] flex items-center gap-[2px] transition",
                         isReordering ? "opacity-0" : "opacity-0 group-hover:opacity-100"
                     )}
                 >

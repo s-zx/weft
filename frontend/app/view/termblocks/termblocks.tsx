@@ -1,6 +1,7 @@
 // Copyright 2026, s-zx
 // SPDX-License-Identifier: Apache-2.0
 
+import { ContextMenuModel } from "@/app/store/contextmenu";
 import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
@@ -42,6 +43,8 @@ export class TermBlocksViewModel implements ViewModel {
     lastGitCwd = "";
     // minVisibleSeq hides every block with seq < this value; bumped on clear.
     minVisibleSeqAtom: jotai.PrimitiveAtom<number>;
+    // Per-oid hide set for one-off "Delete block" actions.
+    hiddenOidsAtom: jotai.PrimitiveAtom<Set<string>>;
     historyAtom: jotai.PrimitiveAtom<string[]>;
 
     disposed = false;
@@ -74,6 +77,7 @@ export class TermBlocksViewModel implements ViewModel {
             }
         }, 4000);
         this.minVisibleSeqAtom = jotai.atom<number>(0) as jotai.PrimitiveAtom<number>;
+        this.hiddenOidsAtom = jotai.atom<Set<string>>(new Set<string>()) as jotai.PrimitiveAtom<Set<string>>;
         this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
         this.loadShellHistory();
 
@@ -149,6 +153,18 @@ export class TermBlocksViewModel implements ViewModel {
         // commands from this point on remain visible.
         const maxSeq = current[current.length - 1].seq;
         globalStore.set(this.minVisibleSeqAtom, maxSeq);
+    }
+
+    hideBlock(oid: string) {
+        const current = globalStore.get(this.hiddenOidsAtom);
+        const next = new Set(current);
+        next.add(oid);
+        globalStore.set(this.hiddenOidsAtom, next);
+    }
+
+    rerunBlock(cmd: string) {
+        if (!cmd) return;
+        this.submitInput(cmd);
     }
 
     async loadShellHistory() {
@@ -677,6 +693,27 @@ function shortenCwd(cwd: string | null | undefined, home: string): string {
     return cwd;
 }
 
+function stripAnsiForCopy(bytes: Uint8Array): string {
+    if (bytes.length === 0) return "";
+    const decoder = new TextDecoder("utf-8", { fatal: false });
+    const raw = decoder.decode(bytes);
+    // Remove OSC, CSI, and basic two-byte escape sequences so the clipboard
+    // has plain text instead of ESC-riddled shell bytes.
+    return raw
+        .replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "")
+        .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "")
+        .replace(/\r\n/g, "\n")
+        .replace(/\r/g, "\n");
+}
+
+async function writeClipboard(text: string): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(text);
+    } catch (e) {
+        console.warn("clipboard write failed", e);
+    }
+}
+
 const TermBlockRow: React.FC<{
     block: CmdBlock;
     output: Uint8Array | undefined;
@@ -695,6 +732,62 @@ const TermBlockRow: React.FC<{
     const branch = gitInfo?.isrepo ? gitInfo.branch : "";
     const hasDiff = gitInfo?.isrepo && ((gitInfo.changedfiles ?? 0) > 0);
 
+    const onContextMenu = (e: React.MouseEvent) => {
+        e.preventDefault();
+        const cmd = block.cmd ?? "";
+        const outputText = output ? stripAnsiForCopy(output) : "";
+        const items: ContextMenuItem[] = [];
+        if (cmd) {
+            items.push({
+                label: "Rerun command",
+                click: () => model.rerunBlock(cmd),
+            });
+            items.push({ type: "separator" });
+            items.push({ label: "Copy command", click: () => writeClipboard(cmd) });
+        }
+        if (outputText) {
+            items.push({ label: "Copy output", click: () => writeClipboard(outputText) });
+        }
+        if (cmd || outputText) {
+            items.push({
+                label: "Copy block as Markdown",
+                click: () => {
+                    const md = [];
+                    if (block.cwd) md.push(`> \`${shortenCwd(block.cwd, home)}\``);
+                    if (cmd) md.push("```sh", "$ " + cmd, "```");
+                    if (outputText) md.push("```", outputText.trimEnd(), "```");
+                    writeClipboard(md.join("\n"));
+                },
+            });
+        }
+        if (items.length > 0) {
+            items.push({ type: "separator" });
+        }
+        if (block.cwd) {
+            items.push({
+                label: "Copy working directory",
+                sublabel: block.cwd,
+                click: () => writeClipboard(block.cwd!),
+            });
+        }
+        if (branch) {
+            items.push({
+                label: "Copy git branch",
+                sublabel: branch,
+                click: () => writeClipboard(branch),
+            });
+        }
+        if (isDone || isError) {
+            items.push({ type: "separator" });
+            items.push({
+                label: "Delete block from view",
+                click: () => model.hideBlock(block.oid),
+            });
+        }
+        if (items.length === 0) return;
+        ContextMenuModel.getInstance().showContextMenu(items, e);
+    };
+
     return (
         <div
             className={cn(
@@ -703,6 +796,7 @@ const TermBlockRow: React.FC<{
                 isError && "termblocks-row-error",
                 !showXterm && "termblocks-row-compact"
             )}
+            onContextMenu={onContextMenu}
         >
             <div className="termblocks-row-meta">
                 {cwd && <span className="termblocks-meta-cwd">{cwd}</span>}
@@ -901,9 +995,10 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     // state is the transient anchor the next OSC C will attach to, with no
     // user-meaningful content yet.
     const minVisibleSeq = useAtomValue(model.minVisibleSeqAtom);
+    const hiddenOids = useAtomValue(model.hiddenOidsAtom);
     const visibleBlocks = React.useMemo(
-        () => blocks.filter((b) => b.state !== "prompt" && b.seq > minVisibleSeq),
-        [blocks, minVisibleSeq]
+        () => blocks.filter((b) => b.state !== "prompt" && b.seq > minVisibleSeq && !hiddenOids.has(b.oid)),
+        [blocks, minVisibleSeq, hiddenOids]
     );
     const lastOid = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1].oid : "";
     const lastOutputLen = lastOid && outputs[lastOid] != null ? outputs[lastOid].length : 0;

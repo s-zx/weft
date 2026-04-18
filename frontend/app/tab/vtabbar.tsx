@@ -3,17 +3,15 @@
 
 import { Tooltip } from "@/app/element/tooltip";
 import { getTabBadgeAtom } from "@/app/store/badge";
-import { getApi } from "@/app/store/global";
 import { getTabModelByTabId } from "@/app/store/tab-model";
 import { makeORef } from "@/app/store/wos";
-import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { useWaveEnv } from "@/app/waveenv/waveenv";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { validateCssColor } from "@/util/color-validator";
 import { cn, fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { buildTabBarContextMenu, buildTabContextMenu } from "./tabcontextmenu";
 import { UpdateStatusBanner } from "./updatebanner";
 import { VTab, VTabItem } from "./vtab";
@@ -104,13 +102,6 @@ interface VTabWrapperProps {
     onHoverChanged: (isHovered: boolean) => void;
 }
 
-function shortenHome(cwd: string, home: string): string {
-    if (!cwd) return "";
-    if (home && cwd === home) return "~";
-    if (home && cwd.startsWith(home + "/")) return "~" + cwd.slice(home.length);
-    return cwd;
-}
-
 function VTabWrapper({
     tabId,
     active,
@@ -154,69 +145,11 @@ function VTabWrapper({
         }
     }
 
-    // Pick a representative cwd: the first block in the tab that has
-    // shell integration populated.  Subscribing to every block's meta
-    // would double the re-render load for crowded tabs; we cap at the
-    // first two.
-    const firstBlockId = tabData?.blockids?.[0];
-    const secondBlockId = tabData?.blockids?.[1];
-    const [firstBlock] = env.wos.useWaveObjectValue<Block>(
-        firstBlockId ? makeORef("block", firstBlockId) : null
-    );
-    const [secondBlock] = env.wos.useWaveObjectValue<Block>(
-        secondBlockId ? makeORef("block", secondBlockId) : null
-    );
-    const cwd = (firstBlock?.meta?.["cmd:cwd"] as string) || (secondBlock?.meta?.["cmd:cwd"] as string) || "";
-    const home = useMemo(() => {
-        try {
-            return getApi().getHomeDir() ?? "";
-        } catch {
-            return "";
-        }
-    }, []);
-    const [gitInfo, setGitInfo] = useState<GitInfoResponse | null>(null);
-    useEffect(() => {
-        if (!cwd) {
-            setGitInfo(null);
-            return;
-        }
-        let cancelled = false;
-        const tick = async () => {
-            try {
-                const info = await RpcApi.GetGitInfoCommand(TabRpcClient, cwd);
-                if (!cancelled) setGitInfo(info ?? null);
-            } catch {
-                if (!cancelled) setGitInfo(null);
-            }
-        };
-        tick();
-        const timer = setInterval(tick, 8000);
-        return () => {
-            cancelled = true;
-            clearInterval(timer);
-        };
-    }, [cwd]);
-
-    const cwdShort = shortenHome(cwd, home);
-    const isRepo = !!gitInfo?.isrepo;
-    // Auto-generated tab names follow the "T<number>" pattern from
-    // pkg/wcore.getNextTabName — if the user hasn't renamed the tab, show
-    // the cwd as the primary label and skip the duplicate subtitle.
-    const rawName = tabData?.name ?? "";
-    const isAutoNamed = /^T\d+$/.test(rawName);
-    const primaryName = isAutoNamed && cwdShort ? cwdShort : rawName;
-    const subtitle = isAutoNamed ? "" : cwdShort;
-
     const tab: VTabItem = {
         id: tabId,
-        name: primaryName,
+        name: tabData?.name ?? "",
         badges,
         flagColor,
-        subtitle,
-        gitBranch: isRepo ? gitInfo?.branch : undefined,
-        gitAdds: isRepo ? gitInfo?.additions : undefined,
-        gitDels: isRepo ? gitInfo?.deletions : undefined,
-        gitChangedFiles: isRepo ? gitInfo?.changedfiles : undefined,
     };
 
     const handleContextMenu = useCallback(

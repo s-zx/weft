@@ -15,11 +15,6 @@ export interface VTabItem {
     badge?: Badge | null;
     badges?: Badge[] | null;
     flagColor?: string | null;
-    subtitle?: string;
-    gitBranch?: string;
-    gitAdds?: number;
-    gitDels?: number;
-    gitChangedFiles?: number;
 }
 
 interface VTabProps {
@@ -167,24 +162,17 @@ export function VTab({
             onMouseEnter={() => onHoverChanged?.(true)}
             onMouseLeave={() => onHoverChanged?.(false)}
             className={cn(
-                "group relative flex w-full shrink-0 cursor-pointer items-center pl-3 text-xs transition-colors select-none",
+                "group relative flex h-9 w-full shrink-0 cursor-pointer items-center pl-3 text-xs transition-colors select-none",
                 "whitespace-nowrap",
-                tab.subtitle ? "min-h-[44px]" : "h-9",
                 active ? "text-primary" : isReordering ? "text-secondary" : "text-secondary hover:text-primary",
                 isDragging && "opacity-50"
             )}
         >
             {active && (
-                <div
-                    className={cn(
-                        "pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-[8px]",
-                        "border border-white/25",
-                        "bg-white/[0.06]"
-                    )}
-                />
+                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-sm bg-foreground/10" />
             )}
             {!active && !isReordering && (
-                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-[8px] bg-transparent transition-colors group-hover:bg-white/[0.05]" />
+                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-sm bg-transparent transition-colors group-hover:bg-foreground/10" />
             )}
             <div
                 className={cn(
@@ -197,45 +185,22 @@ export function VTab({
                 flagColor={flagColor}
                 className="mr-1 min-w-[16px] shrink-0 static top-auto left-auto z-auto h-[16px] w-auto translate-y-0 justify-start px-[2px] py-[1px] [&_i]:text-[10px]"
             />
-            <div className={cn("min-w-0 flex-1 flex flex-col justify-center pr-3 gap-[2px]",
-                onClose && !isReordering && "group-hover:pr-6")}>
-                <div
-                    ref={editableRef}
-                    className={cn(
-                        "overflow-hidden text-ellipsis whitespace-nowrap",
-                        isEditable && "rounded-[2px] bg-white/15 outline-none px-[3px]"
-                    )}
-                    contentEditable={isEditable}
-                    role="textbox"
-                    aria-label="Tab name"
-                    aria-readonly={!isEditable}
-                    onBlur={handleBlur}
-                    onKeyDown={handleKeyDown}
-                    suppressContentEditableWarning={true}
-                >
-                    {tab.name}
-                </div>
-                {tab.subtitle && (
-                    <div className="flex items-center gap-[6px] text-[10px] text-secondary/80 overflow-hidden whitespace-nowrap">
-                        <span className="overflow-hidden text-ellipsis">{tab.subtitle}</span>
-                        {tab.gitBranch && (
-                            <span className="inline-flex items-center gap-[3px] shrink-0 text-[#b8f2c0]">
-                                <i className="fa-solid fa-code-branch text-[9px] opacity-80" aria-hidden />
-                                {tab.gitBranch}
-                            </span>
-                        )}
-                        {tab.gitChangedFiles != null && tab.gitChangedFiles > 0 && (
-                            <span className="shrink-0">
-                                {tab.gitAdds != null && tab.gitAdds > 0 && (
-                                    <span className="text-[#4caf50]">+{tab.gitAdds}</span>
-                                )}
-                                {tab.gitDels != null && tab.gitDels > 0 && (
-                                    <span className="text-[#e57373] ml-[3px]">-{tab.gitDels}</span>
-                                )}
-                            </span>
-                        )}
-                    </div>
+            <div
+                ref={editableRef}
+                className={cn(
+                    "min-w-0 flex-1 overflow-hidden text-ellipsis whitespace-nowrap transition-[padding-right] pr-3",
+                    onClose && !isReordering && "group-hover:pr-6",
+                    isEditable && "rounded-[2px] bg-white/15 outline-none"
                 )}
+                contentEditable={isEditable}
+                role="textbox"
+                aria-label="Tab name"
+                aria-readonly={!isEditable}
+                onBlur={handleBlur}
+                onKeyDown={handleKeyDown}
+                suppressContentEditableWarning={true}
+            >
+                {tab.name}
             </div>
             {onClose && (
                 <button

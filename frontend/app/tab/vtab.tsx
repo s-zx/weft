@@ -185,6 +185,13 @@ export function VTab({
             {!active && !isReordering && (
                 <div className="pointer-events-none absolute inset-x-[6px] inset-y-[5px] rounded-[5px] bg-transparent transition-colors group-hover:bg-white/[0.05]" />
             )}
+            {flagColor && (
+                <div
+                    className="pointer-events-none absolute top-[5px] bottom-[5px] left-[6px] w-[3px] rounded-l-[5px]"
+                    style={{ backgroundColor: flagColor }}
+                    aria-hidden
+                />
+            )}
             <div
                 className={cn(
                     "pointer-events-none absolute bottom-0 left-[5%] right-[5%] h-px bg-border/70",
@@ -245,7 +252,7 @@ export function VTab({
             {onClose && (
                 <div
                     className={cn(
-                        "absolute top-[6px] right-[8px] flex items-center gap-[2px] transition",
+                        "absolute top-[10px] right-[10px] flex items-center gap-[2px] transition",
                         isReordering ? "opacity-0" : "opacity-0 group-hover:opacity-100"
                     )}
                 >

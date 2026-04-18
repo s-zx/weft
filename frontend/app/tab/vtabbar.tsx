@@ -200,11 +200,25 @@ function VTabWrapper({
     const cwdShort = shortenHome(cwd, home);
     const isRepo = !!gitInfo?.isrepo;
     // Auto-generated tab names follow the "T<number>" pattern from
-    // pkg/wcore.getNextTabName — if the user hasn't renamed the tab, show
-    // the cwd as the primary label and skip the duplicate subtitle.
+    // pkg/wcore.getNextTabName.  Hide that placeholder completely:
+    // prefer the real cwd, fall back to ~ (shells almost always start
+    // there) or a generic "Terminal" label when even the home dir is
+    // unknown.  The real cwd replaces whatever standin is showing the
+    // moment OSC 7 lands.
     const rawName = tabData?.name ?? "";
     const isAutoNamed = /^T\d+$/.test(rawName);
-    const primaryName = isAutoNamed && cwdShort ? cwdShort : rawName;
+    let primaryName: string;
+    if (isAutoNamed) {
+        if (cwdShort) {
+            primaryName = cwdShort;
+        } else if (home) {
+            primaryName = "~";
+        } else {
+            primaryName = "Terminal";
+        }
+    } else {
+        primaryName = rawName;
+    }
     const subtitle = isAutoNamed ? "" : cwdShort;
 
     const tab: VTabItem = {

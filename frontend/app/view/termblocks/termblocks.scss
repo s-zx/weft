@@ -3,7 +3,9 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
-    background: #0f1115;
+    // No explicit background — inherit from the workspace content area so
+    // a freshly mounted termblocks view doesn't flash a different color
+    // against the app shell while its children lay out.
 }
 
 .termblocks-scroll {

@@ -197,15 +197,25 @@ function VTabWrapper({
         };
     }, [cwd]);
 
-    const subtitle = shortenHome(cwd, home);
+    const cwdShort = shortenHome(cwd, home);
     const isRepo = !!gitInfo?.isrepo;
+    // Auto-generated tab names follow the "T<number>" pattern from
+    // pkg/wcore.getNextTabName — if the user hasn't renamed the tab, show
+    // the cwd as the primary label and skip the duplicate subtitle.
+    const rawName = tabData?.name ?? "";
+    const isAutoNamed = /^T\d+$/.test(rawName);
+    const primaryName = isAutoNamed && cwdShort ? cwdShort : rawName;
+    const subtitle = isAutoNamed ? "" : cwdShort;
+    // Branch row still shows whether the tab has a meaningful cwd, even
+    // when cwd took over as the primary name.
+    const branchOnly = isAutoNamed && isRepo;
 
     const tab: VTabItem = {
         id: tabId,
-        name: tabData?.name ?? "",
+        name: primaryName,
         badges,
         flagColor,
-        subtitle,
+        subtitle: subtitle || (branchOnly ? " " : ""),
         gitBranch: isRepo ? gitInfo?.branch : undefined,
         gitAdds: isRepo ? gitInfo?.additions : undefined,
         gitDels: isRepo ? gitInfo?.deletions : undefined,

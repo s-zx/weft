@@ -175,10 +175,18 @@ export function VTab({
             )}
         >
             {active && (
-                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-sm bg-foreground/10" />
+                <div
+                    className={cn(
+                        "pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-[8px]",
+                        "border border-white/10",
+                        "bg-gradient-to-b from-white/[0.12] to-white/[0.04]",
+                        "shadow-[inset_0_1px_0_rgba(255,255,255,0.1),0_1px_3px_rgba(0,0,0,0.3)]",
+                        "backdrop-blur-md"
+                    )}
+                />
             )}
             {!active && !isReordering && (
-                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-sm bg-transparent transition-colors group-hover:bg-foreground/10" />
+                <div className="pointer-events-none absolute inset-x-1 inset-y-[4px] rounded-[8px] bg-transparent transition-colors group-hover:bg-white/[0.05]" />
             )}
             <div
                 className={cn(

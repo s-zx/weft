@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/wavetermdev/waveterm/pkg/blocklogger"
+	"github.com/wavetermdev/waveterm/pkg/cmdblock"
 	"github.com/wavetermdev/waveterm/pkg/filestore"
 	"github.com/wavetermdev/waveterm/pkg/panichandler"
 	"github.com/wavetermdev/waveterm/pkg/remote"
@@ -550,12 +551,15 @@ func (bc *ShellController) manageRunningShellProcess(shellProc *shellexec.ShellP
 			close(shellInputCh) // don't use bc.ShellInputCh (it's nil)
 		}()
 		buf := make([]byte, 4096)
+		tracker := cmdblock.MakeTracker(bc.BlockId)
 		for {
 			nr, err := shellProc.Cmd.Read(buf)
 			if nr > 0 {
 				err := HandleAppendBlockFile(bc.BlockId, wavebase.BlockFile_Term, buf[:nr])
 				if err != nil {
 					log.Printf("error appending to blockfile: %v\n", err)
+				} else {
+					tracker.OnBytes(context.Background(), buf[:nr])
 				}
 			}
 			if err == io.EOF {

@@ -3,6 +3,7 @@
     flex-direction: column;
     height: 100%;
     width: 100%;
+    background: #0f1115;
 }
 
 .termblocks-scroll {
@@ -14,28 +15,142 @@
 .termblocks-container {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 12px;
+    padding: 0;
     font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12px;
+    font-size: 13px;
 }
 
+.termblocks-header {
+    display: none;
+}
+
+.termblocks-empty {
+    padding: 24px;
+    color: var(--secondary-text);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.termblocks-error {
+    color: #e57373;
+}
+
+// Each finished / running command is its own row.  No card, no border —
+// just vertical spacing and a subtle divider between rows so the content
+// flows like a traditional terminal while still being selectable.
+.termblocks-row {
+    position: relative;
+    padding: 10px 20px 10px 20px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+
+    &:last-child {
+        border-bottom: none;
+    }
+}
+
+// Thin colored bar on the left edge signals running / error without
+// eating horizontal space.
+.termblocks-row::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: transparent;
+}
+
+.termblocks-row-running::before {
+    background: #40c4ff;
+    animation: termblocks-pulse-bar 1.4s ease-in-out infinite;
+}
+
+.termblocks-row-error::before {
+    background: #e57373;
+}
+
+@keyframes termblocks-pulse-bar {
+    0%,
+    100% {
+        opacity: 0.5;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+
+.termblocks-row-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    margin-bottom: 2px;
+}
+
+.termblocks-meta-cwd {
+    color: rgba(255, 255, 255, 0.55);
+}
+
+.termblocks-meta-dur {
+    opacity: 0.7;
+}
+
+.termblocks-meta-exit {
+    color: #e57373;
+    font-weight: 500;
+}
+
+.termblocks-meta-running {
+    color: #40c4ff;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-size: 10px;
+}
+
+.termblocks-row-cmd {
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: #b8f2c0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    margin: 2px 0 6px;
+}
+
+// xterm output — no card background, flows inline with row content.
+.termblocks-xterm {
+    background: transparent;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+
+    .xterm {
+        height: auto;
+    }
+
+    .xterm-viewport {
+        background: transparent !important;
+    }
+}
+
+// Bottom input
 .termblocks-input-row {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 8px 12px;
-    border-top: 1px solid var(--border);
-    background: rgba(0, 0, 0, 0.3);
+    padding: 10px 20px;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(0, 0, 0, 0.2);
 }
 
 .termblocks-input-prompt {
-    color: var(--accent);
+    color: #b8f2c0;
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-weight: 600;
     font-size: 14px;
-    opacity: 0.8;
+    opacity: 0.9;
 }
 
 .termblocks-input {
@@ -50,22 +165,22 @@
 
     &::placeholder {
         color: var(--secondary-text);
-        opacity: 0.5;
+        opacity: 0.4;
     }
 }
 
 .termblocks-input-interrupt {
     flex: 0 0 auto;
     background: transparent;
-    border: 1px solid var(--border);
+    border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 4px;
     color: #e57373;
     cursor: pointer;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
     padding: 2px 8px;
     line-height: 1;
-    opacity: 0.7;
+    opacity: 0.6;
 
     &:hover {
         opacity: 1;
@@ -73,175 +188,7 @@
     }
 }
 
-.termblocks-running-row {
-    flex: 0 0 auto;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-top: 1px solid var(--border);
-    background: rgba(64, 196, 255, 0.06);
-}
-
-.termblocks-running-indicator {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #40c4ff;
-    box-shadow: 0 0 0 0 rgba(64, 196, 255, 0.55);
-    animation: termblocks-pulse 1.4s ease-in-out infinite;
-    flex: 0 0 auto;
-}
-
-@keyframes termblocks-pulse {
-    0% {
-        box-shadow: 0 0 0 0 rgba(64, 196, 255, 0.55);
-    }
-    70% {
-        box-shadow: 0 0 0 8px rgba(64, 196, 255, 0);
-    }
-    100% {
-        box-shadow: 0 0 0 0 rgba(64, 196, 255, 0);
-    }
-}
-
-.termblocks-running-label {
-    flex: 1 1 auto;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12px;
-    color: var(--foreground);
-    opacity: 0.85;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.termblocks-running-stop {
-    flex: 0 0 auto;
-    background: rgba(229, 115, 115, 0.15);
-    border: 1px solid rgba(229, 115, 115, 0.4);
-    border-radius: 4px;
-    color: #e57373;
-    cursor: pointer;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 4px 12px;
-    line-height: 1.2;
-
-    &:hover {
-        background: rgba(229, 115, 115, 0.25);
-        border-color: rgba(229, 115, 115, 0.7);
-    }
-}
-
-.termblocks-header {
-    font-size: 11px;
-    color: var(--secondary-text);
-    padding-bottom: 4px;
-    border-bottom: 1px solid var(--border);
-    margin-bottom: 4px;
-}
-
-.termblocks-empty {
-    padding: 24px;
-    color: var(--secondary-text);
-    font-size: 13px;
-    line-height: 1.5;
-}
-
-.termblocks-error {
-    color: #e57373;
-}
-
-.termblocks-row {
-    border-radius: 6px;
-    border: 1px solid var(--border);
-    padding: 8px 10px;
-    background: var(--panel-bg);
-}
-
-.termblocks-row-running {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 1px var(--accent);
-}
-
-.termblocks-row-error {
-    border-color: #e57373;
-}
-
-.termblocks-row-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 4px;
-    font-size: 11px;
-    color: var(--secondary-text);
-}
-
-.termblocks-seq {
-    font-weight: 600;
-    color: var(--foreground);
-}
-
-.termblocks-state {
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.termblocks-shell {
-    opacity: 0.7;
-}
-
-.termblocks-exit {
-    padding: 1px 6px;
-    border-radius: 3px;
-    background: rgba(76, 175, 80, 0.15);
-    color: #4caf50;
-
-    &.is-error {
-        background: rgba(229, 115, 115, 0.15);
-        color: #e57373;
-    }
-}
-
-.termblocks-duration {
-    opacity: 0.7;
-}
-
-.termblocks-row-cmd {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    white-space: pre-wrap;
-    word-break: break-all;
-    color: var(--foreground);
-    margin-bottom: 4px;
-}
-
-.termblocks-row-output {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    color: var(--foreground);
-    background: rgba(0, 0, 0, 0.25);
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin: 4px 0 6px;
-    max-height: 400px;
-    overflow-y: auto;
-}
-
-.termblocks-xterm {
-    background: #1a1a1a;
-    border-radius: 4px;
-    padding: 6px 8px;
-    margin: 4px 0 6px;
-    overflow: hidden;
-
-    .xterm {
-        height: auto;
-    }
-}
-
+// Alt-screen takeover
 .termblocks-altscreen-wrap {
     flex: 1 1 auto;
     min-height: 0;
@@ -263,15 +210,4 @@
     .xterm-screen {
         height: 100%;
     }
-}
-
-.termblocks-placeholder {
-    color: var(--secondary-text);
-    font-style: italic;
-}
-
-.termblocks-row-offsets {
-    font-size: 10px;
-    opacity: 0.5;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
 }

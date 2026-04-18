@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import * as WOS from "@/app/store/wos";
+import { getApi, getBlockMetaKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
@@ -35,6 +36,8 @@ export class TermBlocksViewModel implements ViewModel {
     loadingAtom: jotai.PrimitiveAtom<boolean>;
     errorAtom: jotai.PrimitiveAtom<string>;
     altScreenOIDAtom: jotai.PrimitiveAtom<string>;
+    blockCwdAtom!: jotai.Atom<string>;
+    homeAtom: jotai.PrimitiveAtom<string>;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -51,6 +54,14 @@ export class TermBlocksViewModel implements ViewModel {
         this.loadingAtom = jotai.atom<boolean>(true);
         this.errorAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
         this.altScreenOIDAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
+        this.homeAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
+        try {
+            globalStore.set(this.homeAtom, getApi().getHomeDir() ?? "");
+        } catch {
+            // preview/test envs without the electron preload: leave home empty
+        }
+        const cwdMetaAtom = getBlockMetaKeyAtom(blockId, "cmd:cwd");
+        this.blockCwdAtom = jotai.atom((get) => (get(cwdMetaAtom) as string) ?? "");
 
         this.viewText = jotai.atom<HeaderElem[]>([
             {
@@ -505,35 +516,51 @@ const XtermOutput: React.FC<{
 };
 XtermOutput.displayName = "XtermOutput";
 
+function formatDuration(ms: number | null | undefined): string {
+    if (ms == null) return "";
+    if (ms < 1000) return `${ms}ms`;
+    const s = ms / 1000;
+    if (s < 60) return `${s.toFixed(s < 10 ? 2 : 1)}s`;
+    const m = Math.floor(s / 60);
+    const rem = Math.round(s - m * 60);
+    return `${m}m${rem}s`;
+}
+
+function shortenCwd(cwd: string | null | undefined, home: string): string {
+    if (!cwd) return "";
+    if (home && cwd === home) return "~";
+    if (home && cwd.startsWith(home + "/")) return "~" + cwd.slice(home.length);
+    return cwd;
+}
+
 const TermBlockRow: React.FC<{
     block: CmdBlock;
     output: Uint8Array | undefined;
     model: TermBlocksViewModel;
-}> = ({ block, output, model }) => {
+    fallbackCwd: string;
+    home: string;
+}> = ({ block, output, model, fallbackCwd, home }) => {
     const isDone = block.state === "done";
     const isRunning = block.state === "running";
     const isError = isDone && block.exitcode != null && block.exitcode !== 0;
     const hasOutput = output != null && output.length > 0;
-    const showXterm = hasOutput || isRunning; // always render for running so stdin is live
+    const showXterm = hasOutput || isRunning;
+    const cwd = shortenCwd(block.cwd ?? fallbackCwd, home);
+    const duration = formatDuration(block.durationms);
 
     return (
         <div className={cn("termblocks-row", `termblocks-row-${block.state}`, isError && "termblocks-row-error")}>
-            <div className="termblocks-row-head">
-                <span className="termblocks-seq">#{block.seq}</span>
-                <span className="termblocks-state">{block.state}</span>
-                {block.shelltype && <span className="termblocks-shell">{block.shelltype}</span>}
-                {isDone && (
-                    <span className={cn("termblocks-exit", isError && "is-error")}>exit {block.exitcode ?? "?"}</span>
+            <div className="termblocks-row-meta">
+                {cwd && <span className="termblocks-meta-cwd">{cwd}</span>}
+                {duration && <span className="termblocks-meta-dur">({duration})</span>}
+                {isError && (
+                    <span className="termblocks-meta-exit" title={`exit ${block.exitcode}`}>
+                        ✕ exit {block.exitcode}
+                    </span>
                 )}
-                {block.durationms != null && <span className="termblocks-duration">{block.durationms}ms</span>}
+                {isRunning && <span className="termblocks-meta-running">running…</span>}
             </div>
-            <div className="termblocks-row-cmd">
-                {block.cmd ? (
-                    block.cmd
-                ) : (
-                    <em className="termblocks-placeholder">(waiting for command)</em>
-                )}
-            </div>
+            {block.cmd && <div className="termblocks-row-cmd">{block.cmd}</div>}
             {showXterm && (
                 <XtermOutput
                     bytes={output ?? new Uint8Array()}
@@ -542,12 +569,6 @@ const TermBlockRow: React.FC<{
                     onResize={isRunning ? (r, c) => model.sendResize(r, c) : undefined}
                 />
             )}
-            <div className="termblocks-row-offsets">
-                prompt@{block.promptoffset}
-                {block.cmdoffset != null && ` • cmd@${block.cmdoffset}`}
-                {block.outputstartoffset != null &&
-                    ` • out[${block.outputstartoffset}..${block.outputendoffset ?? "…"}]`}
-            </div>
         </div>
     );
 };
@@ -637,6 +658,8 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const loading = useAtomValue(model.loadingAtom);
     const error = useAtomValue(model.errorAtom);
     const altOID = useAtomValue(model.altScreenOIDAtom);
+    const blockMetaCwd = useAtomValue(model.blockCwdAtom);
+    const home = useAtomValue(model.homeAtom);
     const scrollRef = React.useRef<HTMLDivElement>(null);
 
     // Only render rows that actually represent a command — a bare "prompt"
@@ -704,16 +727,14 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                 )}
                 {visibleBlocks.length > 0 && (
                     <div className="termblocks-container">
-                        <div className="termblocks-header">
-                            {visibleBlocks.length} command{visibleBlocks.length === 1 ? "" : "s"} · block{" "}
-                            {model.blockId.slice(0, 8)}
-                        </div>
                         {visibleBlocks.map((cb) => (
                             <TermBlockRow
                                 key={cb.oid}
                                 block={cb}
                                 output={outputs[cb.oid]}
                                 model={model}
+                                fallbackCwd={blockMetaCwd}
+                                home={home}
                             />
                         ))}
                     </div>

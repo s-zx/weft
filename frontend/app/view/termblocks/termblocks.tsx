@@ -41,6 +41,9 @@ export class TermBlocksViewModel implements ViewModel {
     gitInfoAtom: jotai.PrimitiveAtom<GitInfoResponse | null>;
     gitPollTimer: ReturnType<typeof setInterval> | null = null;
     lastGitCwd = "";
+    // minVisibleSeq hides every block with seq < this value; bumped on clear.
+    minVisibleSeqAtom: jotai.PrimitiveAtom<number>;
+    historyAtom: jotai.PrimitiveAtom<string[]>;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -71,6 +74,9 @@ export class TermBlocksViewModel implements ViewModel {
                 this.refreshGitInfo();
             }
         }, 4000);
+        this.minVisibleSeqAtom = jotai.atom<number>(0) as jotai.PrimitiveAtom<number>;
+        this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
+        this.loadShellHistory();
 
         this.viewText = jotai.atom<HeaderElem[]>([
             {
@@ -137,6 +143,40 @@ export class TermBlocksViewModel implements ViewModel {
                 },
             })
         );
+        this.unsubs.push(
+            waveEventSubscribeSingle({
+                eventType: "cmdblock:clear",
+                scope,
+                handler: () => this.applyClear(),
+            })
+        );
+    }
+
+    applyClear() {
+        if (this.disposed) return;
+        const current = globalStore.get(this.blocksAtom);
+        if (current.length === 0) return;
+        // Hide everything up to (but not including) the newest row; subsequent
+        // commands from this point on remain visible.
+        const maxSeq = current[current.length - 1].seq;
+        globalStore.set(this.minVisibleSeqAtom, maxSeq);
+    }
+
+    async loadShellHistory() {
+        try {
+            const resp = await RpcApi.GetShellHistoryCommand(TabRpcClient, {});
+            if (this.disposed) return;
+            globalStore.set(this.historyAtom, resp?.lines ?? []);
+        } catch (e) {
+            console.warn("termblocks: history load failed", e);
+        }
+    }
+
+    recordHistory(line: string) {
+        if (!line) return;
+        const current = globalStore.get(this.historyAtom);
+        if (current.length > 0 && current[current.length - 1] === line) return;
+        globalStore.set(this.historyAtom, [...current, line]);
     }
 
     applyRow(row: CmdBlock) {
@@ -657,25 +697,50 @@ TermBlockRow.displayName = "TermBlockRow";
 
 const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
     const inputRef = model.inputRef;
-    const historyRef = React.useRef<string[]>([]);
+    const history = useAtomValue(model.historyAtom);
     const historyIdxRef = React.useRef<number>(-1);
+    const draftRef = React.useRef<string>("");
     const [value, setValue] = React.useState("");
+
+    // Ghost suggestion: latest history entry that starts with the typed prefix
+    // but is strictly longer.  Shown dimmed after the caret; Tab/Right-arrow
+    // accepts it.  Matches the "inline autosuggest" behaviour zsh-autosuggestions
+    // and fish pioneered and Warp echoes.
+    const ghost = React.useMemo(() => {
+        if (!value) return "";
+        for (let i = history.length - 1; i >= 0; i--) {
+            const h = history[i];
+            if (h.length > value.length && h.startsWith(value)) {
+                return h.slice(value.length);
+            }
+        }
+        return "";
+    }, [value, history]);
 
     const submit = () => {
         const line = value;
         if (line.length === 0) {
             return;
         }
-        historyRef.current.push(line);
-        historyIdxRef.current = historyRef.current.length;
+        model.recordHistory(line);
+        historyIdxRef.current = -1;
+        draftRef.current = "";
         setValue("");
         model.submitInput(line);
+    };
+
+    const acceptGhost = () => {
+        if (!ghost) return false;
+        setValue(value + ghost);
+        return true;
     };
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
         if (e.ctrlKey && e.key.toLowerCase() === "c" && !e.metaKey) {
             e.preventDefault();
             setValue("");
+            historyIdxRef.current = -1;
+            draftRef.current = "";
             model.sendInterrupt();
             return;
         }
@@ -684,42 +749,72 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
             submit();
             return;
         }
-        if (e.key === "ArrowUp") {
-            if (historyRef.current.length === 0) return;
+        if (e.key === "Tab" && !e.shiftKey) {
             e.preventDefault();
+            acceptGhost();
+            return;
+        }
+        if (e.key === "ArrowRight" && inputRef.current != null) {
+            const el = inputRef.current;
+            if (el.selectionStart === value.length && el.selectionEnd === value.length && ghost) {
+                e.preventDefault();
+                acceptGhost();
+                return;
+            }
+        }
+        if (e.key === "ArrowUp") {
+            if (history.length === 0) return;
+            e.preventDefault();
+            if (historyIdxRef.current === -1) {
+                draftRef.current = value;
+                historyIdxRef.current = history.length;
+            }
             historyIdxRef.current = Math.max(0, historyIdxRef.current - 1);
-            setValue(historyRef.current[historyIdxRef.current] ?? "");
+            setValue(history[historyIdxRef.current] ?? "");
             return;
         }
         if (e.key === "ArrowDown") {
-            if (historyRef.current.length === 0) return;
+            if (history.length === 0 || historyIdxRef.current === -1) return;
             e.preventDefault();
             const next = historyIdxRef.current + 1;
-            if (next >= historyRef.current.length) {
-                historyIdxRef.current = historyRef.current.length;
-                setValue("");
+            if (next >= history.length) {
+                historyIdxRef.current = -1;
+                setValue(draftRef.current);
+                draftRef.current = "";
             } else {
                 historyIdxRef.current = next;
-                setValue(historyRef.current[next]);
+                setValue(history[next]);
             }
+            return;
         }
     };
 
     return (
         <div className="termblocks-input-row">
             <span className="termblocks-input-prompt">›</span>
-            <input
-                ref={inputRef}
-                className="termblocks-input"
-                type="text"
-                value={value}
-                autoFocus
-                spellCheck={false}
-                autoComplete="off"
-                placeholder="Type a command and press Enter. Ctrl-C to interrupt."
-                onChange={(e) => setValue(e.target.value)}
-                onKeyDown={onKeyDown}
-            />
+            <div className="termblocks-input-wrap">
+                <input
+                    ref={inputRef}
+                    className="termblocks-input"
+                    type="text"
+                    value={value}
+                    autoFocus
+                    spellCheck={false}
+                    autoComplete="off"
+                    placeholder="Type a command and press Enter. Ctrl-C to interrupt."
+                    onChange={(e) => {
+                        setValue(e.target.value);
+                        historyIdxRef.current = -1;
+                    }}
+                    onKeyDown={onKeyDown}
+                />
+                {ghost && (
+                    <span className="termblocks-input-ghost" aria-hidden>
+                        <span className="termblocks-input-ghost-prefix">{value}</span>
+                        <span className="termblocks-input-ghost-suffix">{ghost}</span>
+                    </span>
+                )}
+            </div>
             <button
                 type="button"
                 className="termblocks-input-interrupt"
@@ -755,7 +850,11 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     // Only render rows that actually represent a command — a bare "prompt"
     // state is the transient anchor the next OSC C will attach to, with no
     // user-meaningful content yet.
-    const visibleBlocks = React.useMemo(() => blocks.filter((b) => b.state !== "prompt"), [blocks]);
+    const minVisibleSeq = useAtomValue(model.minVisibleSeqAtom);
+    const visibleBlocks = React.useMemo(
+        () => blocks.filter((b) => b.state !== "prompt" && b.seq > minVisibleSeq),
+        [blocks, minVisibleSeq]
+    );
     const lastOid = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1].oid : "";
     const lastOutputLen = lastOid && outputs[lastOid] != null ? outputs[lastOid].length : 0;
     const inAltScreen = altOID !== "";

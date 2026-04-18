@@ -269,6 +269,12 @@ declare global {
         data64: string;
     };
 
+    // cbtypes.CmdBlockClearEvent
+    type CmdBlockClearEvent = {
+        blockid: string;
+        throughoid?: string;
+    };
+
     // wshrpc.CommandAuthenticateJobManagerData
     type CommandAuthenticateJobManagerData = {
         jobid: string;
@@ -455,6 +461,12 @@ declare global {
     // wshrpc.CommandGetRTInfoData
     type CommandGetRTInfoData = {
         oref: ORef;
+    };
+
+    // wshrpc.CommandGetShellHistoryData
+    type CommandGetShellHistoryData = {
+        shell?: string;
+        limit?: number;
     };
 
     // wshrpc.CommandGetTempDirData
@@ -1552,6 +1564,11 @@ declare global {
         "tsunami:sdkreplacepath"?: string;
         "tsunami:sdkversion"?: string;
         "tsunami:gopath"?: string;
+    };
+
+    // wshrpc.ShellHistoryResponse
+    type ShellHistoryResponse = {
+        lines: string[];
     };
 
     // waveobj.StickerClickOptsType

@@ -1481,6 +1481,12 @@ func (ws *WshServer) GetCmdBlocksCommand(ctx context.Context, data wshrpc.Comman
 	return cmdblock.GetByBlockID(ctx, data.BlockID, data.Limit)
 }
 
+func (ws *WshServer) GetShellHistoryCommand(ctx context.Context, data wshrpc.CommandGetShellHistoryData) (*wshrpc.ShellHistoryResponse, error) {
+	return &wshrpc.ShellHistoryResponse{
+		Lines: cmdblock.LoadShellHistory(data.Shell, data.Limit),
+	}, nil
+}
+
 func (ws *WshServer) GetGitInfoCommand(ctx context.Context, cwd string) (*wshrpc.GitInfoResponse, error) {
 	info, err := cmdblock.LookupGitInfo(ctx, cwd)
 	if err != nil {

@@ -480,6 +480,12 @@ export class RpcApiType {
         return client.wshRpcCall("getsecretsnames", null, opts);
     }
 
+    // command "getshellhistory" [call]
+    GetShellHistoryCommand(client: WshClient, data: CommandGetShellHistoryData, opts?: RpcOpts): Promise<ShellHistoryResponse> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "getshellhistory", data, opts);
+        return client.wshRpcCall("getshellhistory", data, opts);
+    }
+
     // command "gettab" [call]
     GetTabCommand(client: WshClient, data: string, opts?: RpcOpts): Promise<Tab> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "gettab", data, opts);

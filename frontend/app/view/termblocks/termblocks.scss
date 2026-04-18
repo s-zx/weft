@@ -185,8 +185,16 @@
     opacity: 0.9;
 }
 
-.termblocks-input {
+.termblocks-input-wrap {
     flex: 1 1 auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+}
+
+.termblocks-input {
+    width: 100%;
     background: transparent;
     border: none;
     outline: none;
@@ -194,11 +202,38 @@
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
     padding: 4px 0;
+    position: relative;
+    z-index: 1;
 
     &::placeholder {
         color: var(--secondary-text);
         opacity: 0.4;
     }
+}
+
+// Ghost suggestion sits underneath the input with the same font metrics; the
+// prefix is invisible (transparent, just spacer) so the dimmed suffix aligns
+// exactly past the typed text.
+.termblocks-input-ghost {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    pointer-events: none;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 13px;
+    padding: 4px 0;
+    white-space: pre;
+    overflow: hidden;
+    z-index: 0;
+}
+
+.termblocks-input-ghost-prefix {
+    color: transparent;
+}
+
+.termblocks-input-ghost-suffix {
+    color: rgba(255, 255, 255, 0.28);
 }
 
 .termblocks-input-interrupt {

@@ -37,6 +37,14 @@ type CmdBlockAltScreenEvent struct {
 	Enter   bool   `json:"enter"`
 }
 
+// CmdBlockClearEvent is published when the shell emits a screen-clear
+// escape (CSI 2J or 3J); the frontend hides every prior block from the
+// list so the view mirrors `clear` in a regular terminal.
+type CmdBlockClearEvent struct {
+	BlockID    string `json:"blockid"`
+	ThroughOID string `json:"throughoid,omitempty"`
+}
+
 // CmdBlock is one shell-command lifecycle tracked inside a terminal block.
 //
 // Each row covers the span from OSC 16162;A (prompt appeared) to OSC 16162;D

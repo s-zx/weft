@@ -479,6 +479,12 @@ func GetSecretsNamesCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) ([]string, 
 	return resp, err
 }
 
+// command "getshellhistory", wshserver.GetShellHistoryCommand
+func GetShellHistoryCommand(w *wshutil.WshRpc, data wshrpc.CommandGetShellHistoryData, opts *wshrpc.RpcOpts) (*wshrpc.ShellHistoryResponse, error) {
+	resp, err := sendRpcRequestCallHelper[*wshrpc.ShellHistoryResponse](w, "getshellhistory", data, opts)
+	return resp, err
+}
+
 // command "gettab", wshserver.GetTabCommand
 func GetTabCommand(w *wshutil.WshRpc, data string, opts *wshrpc.RpcOpts) (*waveobj.Tab, error) {
 	resp, err := sendRpcRequestCallHelper[*waveobj.Tab](w, "gettab", data, opts)

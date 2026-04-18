@@ -23,6 +23,8 @@ import (
 var altScreenEnterSeq = []byte("\x1b[?1049h")
 var altScreenExitSeq = []byte("\x1b[?1049l")
 var osc7Prefix = []byte("\x1b]7;")
+var clearScreenSeq = []byte("\x1b[2J")
+var clearScrollbackSeq = []byte("\x1b[3J")
 
 // Tracker glues the OSC 16162 parser to the cmdblock store for one shell
 // session.  Hook it into a PTY read loop by calling OnBytes each time a chunk
@@ -68,6 +70,24 @@ func (t *Tracker) OnBytes(ctx context.Context, chunk []byte) {
 	}
 	t.detectAltScreen(chunk)
 	t.detectOsc7(ctx, chunk)
+	t.detectClear(chunk)
+}
+
+// detectClear watches for CSI 2J or 3J in the PTY stream and emits a
+// cmdblock:clear event so the frontend can hide every block above the
+// current one, matching `clear` behaviour in a traditional terminal.
+func (t *Tracker) detectClear(chunk []byte) {
+	if !bytes.Contains(chunk, clearScreenSeq) && !bytes.Contains(chunk, clearScrollbackSeq) {
+		return
+	}
+	wps.Broker.Publish(wps.WaveEvent{
+		Event:  wps.Event_CmdBlockClear,
+		Scopes: []string{"block:" + t.blockID},
+		Data: &cbtypes.CmdBlockClearEvent{
+			BlockID:    t.blockID,
+			ThroughOID: t.currentOID,
+		},
+	})
 }
 
 // detectOsc7 scans chunk for the "ESC ] 7 ; file://host/path ST" cwd update

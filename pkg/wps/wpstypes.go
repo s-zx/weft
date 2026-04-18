@@ -37,6 +37,7 @@ const (
 	Event_CmdBlockRow         = "cmdblock:row"         // type: *cbtypes.CmdBlock
 	Event_CmdBlockChunk       = "cmdblock:chunk"       // type: *cbtypes.CmdBlockChunkEvent
 	Event_CmdBlockAltScreen   = "cmdblock:altscreen"   // type: *cbtypes.CmdBlockAltScreenEvent
+	Event_CmdBlockClear       = "cmdblock:clear"       // type: *cbtypes.CmdBlockClearEvent
 )
 
 var AllEvents []string = []string{
@@ -62,6 +63,7 @@ var AllEvents []string = []string{
 	Event_CmdBlockRow,
 	Event_CmdBlockChunk,
 	Event_CmdBlockAltScreen,
+	Event_CmdBlockClear,
 }
 
 type WaveEvent struct {

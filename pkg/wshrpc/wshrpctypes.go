@@ -101,6 +101,7 @@ type WshRpcInterface interface {
 	GetCmdBlocksCommand(ctx context.Context, data CommandGetCmdBlocksData) ([]*cbtypes.CmdBlock, error)
 	ReadBlockFileRangeCommand(ctx context.Context, data CommandReadBlockFileRangeData) (*BlockFileRangeResponse, error)
 	GetGitInfoCommand(ctx context.Context, cwd string) (*GitInfoResponse, error)
+	GetShellHistoryCommand(ctx context.Context, data CommandGetShellHistoryData) (*ShellHistoryResponse, error)
 
 	// connection functions
 	ConnStatusCommand(ctx context.Context) ([]ConnStatus, error)
@@ -390,6 +391,15 @@ type GitInfoResponse struct {
 	Deletions    int    `json:"deletions,omitempty"`
 	Ahead        int    `json:"ahead,omitempty"`
 	Behind       int    `json:"behind,omitempty"`
+}
+
+type CommandGetShellHistoryData struct {
+	Shell string `json:"shell,omitempty"`
+	Limit int    `json:"limit,omitempty"`
+}
+
+type ShellHistoryResponse struct {
+	Lines []string `json:"lines"`
 }
 
 type CommandWriteTempFileData struct {

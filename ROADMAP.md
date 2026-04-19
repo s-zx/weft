@@ -3,6 +3,8 @@
 > 本文档原为 fork 上游 `wavetermdev/waveterm` 的 ROADMAP.md，已替换为 crest fork 的实际方案。
 >
 > 状态图例：✅ Done | 🔧 In Progress | 🔷 Planned | 🤞 Stretch Goal
+>
+> **⚠️ 战略方向已升级（2026-04-20）**：v1 定位是"复现 Warp"。从 M3 起定位升级为"开源 Agent Runtime 底座"，详见 [ROADMAP-v2.md](./ROADMAP-v2.md)。本文档保留 M0/M1/M2 的实况回填与历史计划，M3-M7 以 v2 为准。
 
 ## Context
 

@@ -7,13 +7,17 @@ import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { atoms } from "@/store/global";
 import { base64ToArray, cn, stringToBase64 } from "@/util/util";
+import { formatRemoteUri } from "@/util/waveutil";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
+import { quote as shellQuote } from "shell-quote";
 import * as jotai from "jotai";
 import { useAtomValue } from "jotai";
 import * as React from "react";
+import * as ReactDOM from "react-dom";
 import "@xterm/xterm/css/xterm.css";
 import "./termblocks.scss";
 
@@ -975,7 +979,6 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
 
     return (
         <div className="termblocks-input-row">
-            <span className="termblocks-input-prompt">›</span>
             <div className="termblocks-input-wrap">
                 <div className="termblocks-input-highlight" aria-hidden>
                     {tokens.map((t, idx) => (
@@ -993,7 +996,6 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
                     autoFocus
                     spellCheck={false}
                     autoComplete="off"
-                    placeholder="Type a command and press Enter. Ctrl-C to interrupt."
                     onChange={(e) => {
                         setValue(e.target.value);
                         historyIdxRef.current = -1;
@@ -1001,14 +1003,6 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
                     onKeyDown={onKeyDown}
                 />
             </div>
-            <button
-                type="button"
-                className="termblocks-input-interrupt"
-                title="Send SIGINT (Ctrl-C)"
-                onClick={() => model.sendInterrupt()}
-            >
-                <i className="fa-solid fa-ban" aria-hidden />
-            </button>
         </div>
     );
 };
@@ -1139,48 +1133,284 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                     </div>
                 )}
             </div>
-            <TermBlocksStatusBar cwd={blockMetaCwd} home={home} gitInfo={gitInfo} />
-            {runningBlock == null && <TermBlocksInput model={model} />}
+            <div className="termblocks-input-card">
+                <TermBlocksStatusBar cwd={blockMetaCwd} home={home} gitInfo={gitInfo} blockId={model.blockId} />
+                {runningBlock == null && <TermBlocksInput model={model} />}
+            </div>
         </div>
     );
 };
 TermBlocksView.displayName = "TermBlocksView";
 
+// ---- Chip Popover helper ----
+// Renders via ReactDOM.createPortal at document.body with position:fixed so
+// no parent overflow:hidden or z-index can obscure the dropdown.
+// Position is calculated from the trigger's getBoundingClientRect() and the
+// dropdown is anchored above the trigger (bottom of dropdown = top of trigger).
+const ChipPopover: React.FC<{
+    trigger: React.ReactNode;
+    children: (close: () => void) => React.ReactNode;
+}> = ({ trigger, children }) => {
+    const [open, setOpen] = React.useState(false);
+    const [rect, setRect] = React.useState<DOMRect | null>(null);
+    const triggerRef = React.useRef<HTMLSpanElement>(null);
+    const dropdownRef = React.useRef<HTMLDivElement>(null);
+
+    const toggle = () => {
+        if (!open && triggerRef.current) {
+            setRect(triggerRef.current.getBoundingClientRect());
+        }
+        setOpen((v) => !v);
+    };
+
+    React.useEffect(() => {
+        if (!open) return;
+        const handler = (e: MouseEvent) => {
+            const target = e.target as Node;
+            if (
+                dropdownRef.current && !dropdownRef.current.contains(target) &&
+                triggerRef.current && !triggerRef.current.contains(target)
+            ) {
+                setOpen(false);
+            }
+        };
+        document.addEventListener("mousedown", handler);
+        return () => document.removeEventListener("mousedown", handler);
+    }, [open]);
+
+    const dropdownStyle: React.CSSProperties = rect
+        ? {
+            position: "fixed",
+            left: rect.left,
+            bottom: window.innerHeight - rect.top + 6,
+            zIndex: 99999,
+            minWidth: Math.max(rect.width, 220),
+        }
+        : { display: "none" };
+
+    return (
+        <>
+            <span ref={triggerRef} onClick={toggle}>{trigger}</span>
+            {open && rect && ReactDOM.createPortal(
+                <div ref={dropdownRef} style={dropdownStyle}>
+                    {children(() => setOpen(false))}
+                </div>,
+                document.body
+            )}
+        </>
+    );
+};
+ChipPopover.displayName = "ChipPopover";
+
+// ---- cwd picker dropdown content ----
+const CwdPickerContent: React.FC<{ cwd: string; blockId: string; close: () => void }> = ({ cwd, blockId, close }) => {
+    const [entries, setEntries] = React.useState<FileInfo[]>([]);
+    const [search, setSearch] = React.useState("");
+    const searchRef = React.useRef<HTMLInputElement>(null);
+    const [focused, setFocused] = React.useState(0);
+
+    React.useEffect(() => {
+        searchRef.current?.focus();
+        const load = async () => {
+            const list: FileInfo[] = [];
+            const stream = RpcApi.FileListStreamCommand(TabRpcClient, { path: formatRemoteUri(cwd, "local") }, null);
+            for await (const chunk of stream) {
+                if (chunk?.fileinfo) list.push(...chunk.fileinfo.filter((f) => f.isdir));
+            }
+            list.sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+            setEntries(list);
+        };
+        load().catch(() => {});
+    }, [cwd]);
+
+    const navigate = (path: string) => {
+        const cmd = `cd ${shellQuote([path])}\n`;
+        RpcApi.ControllerInputCommand(TabRpcClient, { blockid: blockId, inputdata64: stringToBase64(cmd) });
+        close();
+    };
+
+    const filtered = React.useMemo(() => {
+        const s = search.toLowerCase();
+        return s ? entries.filter((e) => (e.name ?? "").toLowerCase().includes(s)) : entries;
+    }, [entries, search]);
+
+    const rows = React.useMemo(() => [
+        ...(search ? [] : [{ path: cwd + "/..", label: ".. (Parent Directory)", icon: "fa-solid fa-arrow-up" }]),
+        ...filtered.map((e) => ({ path: e.path, label: e.name ?? e.path, icon: "fa-regular fa-folder" })),
+    ], [cwd, search, filtered]);
+
+    const clampFocus = (n: number) => Math.max(0, Math.min(n, rows.length - 1));
+
+    return (
+        <div className="tb-chip-dropdown">
+            <div className="tb-chip-dropdown-search">
+                <i className="fa-solid fa-magnifying-glass" style={{ opacity: 0.4, fontSize: 11 }} />
+                <input
+                    ref={searchRef}
+                    value={search}
+                    onChange={(e) => { setSearch(e.target.value); setFocused(0); }}
+                    placeholder="Search directories..."
+                    spellCheck={false}
+                    className="tb-chip-dropdown-input"
+                    onKeyDown={(e) => {
+                        if (e.key === "ArrowDown") { e.preventDefault(); setFocused((f) => clampFocus(f + 1)); }
+                        if (e.key === "ArrowUp") { e.preventDefault(); setFocused((f) => clampFocus(f - 1)); }
+                        if (e.key === "Enter" && rows[focused]) navigate(rows[focused].path);
+                        if (e.key === "Escape") close();
+                    }}
+                />
+            </div>
+            <div className="tb-chip-dropdown-list">
+                {rows.map((r, i) => (
+                    <div
+                        key={r.path}
+                        className={cn("tb-chip-dropdown-row", i === focused && "tb-chip-dropdown-row-active")}
+                        onMouseEnter={() => setFocused(i)}
+                        onClick={() => navigate(r.path)}
+                    >
+                        <i className={`${r.icon} tb-chip-dropdown-row-icon`} aria-hidden />
+                        {r.label}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+CwdPickerContent.displayName = "CwdPickerContent";
+
+// ---- git branch picker ----
+const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockId: string; close: () => void }> = ({
+    cwd, currentBranch, blockId, close,
+}) => {
+    const [branches, setBranches] = React.useState<string[]>([]);
+    const [focused, setFocused] = React.useState(0);
+    const searchRef = React.useRef<HTMLInputElement>(null);
+    const [search, setSearch] = React.useState("");
+
+    React.useEffect(() => {
+        searchRef.current?.focus();
+        const load = async () => {
+            const res = await RpcApi.RunLocalCmdCommand(TabRpcClient, {
+                cmd: "git",
+                args: ["branch", "--format=%(refname:short)"],
+                cwd,
+            });
+            const list = res.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
+            // current branch first, rest sorted
+            list.sort((a, b) => {
+                if (a === currentBranch) return -1;
+                if (b === currentBranch) return 1;
+                return a.localeCompare(b);
+            });
+            setBranches(list);
+        };
+        load().catch(() => {});
+    }, [cwd, currentBranch]);
+
+    const filtered = search ? branches.filter((b) => b.toLowerCase().includes(search.toLowerCase())) : branches;
+    const clamp = (n: number) => Math.max(0, Math.min(n, filtered.length - 1));
+
+    const checkout = (branch: string) => {
+        const cmd = `git checkout ${shellQuote([branch])}\n`;
+        RpcApi.ControllerInputCommand(TabRpcClient, { blockid: blockId, inputdata64: stringToBase64(cmd) });
+        close();
+    };
+
+    return (
+        <div className="tb-chip-dropdown">
+            <div className="tb-chip-dropdown-search">
+                <i className="fa-solid fa-magnifying-glass" style={{ opacity: 0.4, fontSize: 11 }} />
+                <input
+                    ref={searchRef}
+                    value={search}
+                    onChange={(e) => { setSearch(e.target.value); setFocused(0); }}
+                    placeholder="Search branches..."
+                    spellCheck={false}
+                    className="tb-chip-dropdown-input"
+                    onKeyDown={(e) => {
+                        if (e.key === "ArrowDown") { e.preventDefault(); setFocused((f) => clamp(f + 1)); }
+                        if (e.key === "ArrowUp") { e.preventDefault(); setFocused((f) => clamp(f - 1)); }
+                        if (e.key === "Enter" && filtered[focused]) checkout(filtered[focused]);
+                        if (e.key === "Escape") close();
+                    }}
+                />
+            </div>
+            <div className="tb-chip-dropdown-list">
+                {filtered.map((b, i) => (
+                    <div
+                        key={b}
+                        className={cn("tb-chip-dropdown-row", i === focused && "tb-chip-dropdown-row-active")}
+                        onMouseEnter={() => setFocused(i)}
+                        onClick={() => checkout(b)}
+                    >
+                        {b === currentBranch
+                            ? <i className="fa-solid fa-check tb-chip-dropdown-row-icon" aria-hidden />
+                            : <i className="fa-solid fa-code-branch tb-chip-dropdown-row-icon" aria-hidden />
+                        }
+                        {b}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+BranchPickerContent.displayName = "BranchPickerContent";
+
+// ---- Updated status bar with clickable chips ----
 const TermBlocksStatusBar: React.FC<{
     cwd: string;
     home: string;
     gitInfo: GitInfoResponse | null;
-}> = ({ cwd, home, gitInfo }) => {
+    blockId: string;
+}> = ({ cwd, home, gitInfo, blockId }) => {
     const shortCwd = shortenCwd(cwd, home);
-    if (!shortCwd && !gitInfo?.isrepo) {
-        return null;
-    }
+    const hasDiff = gitInfo?.isrepo && (gitInfo.changedfiles ?? 0) > 0;
+    if (!shortCwd && !gitInfo?.isrepo) return null;
+
     return (
         <div className="termblocks-statusbar">
             {shortCwd && (
-                <span className="termblocks-chip" title={cwd}>
-                    <i className="fa-regular fa-folder termblocks-chip-icon" aria-hidden />
-                    {shortCwd}
-                </span>
+                <ChipPopover trigger={
+                    <span className="termblocks-chip termblocks-chip-clickable" title={cwd}>
+                        <i className="fa-regular fa-folder termblocks-chip-icon" aria-hidden />
+                        {shortCwd}
+                    </span>
+                }>
+                    {(close) => <CwdPickerContent cwd={cwd} blockId={blockId} close={close} />}
+                </ChipPopover>
             )}
             {gitInfo?.isrepo && gitInfo.branch && (
-                <span className="termblocks-chip" title="git branch">
-                    <i className="fa-solid fa-code-branch termblocks-chip-icon" aria-hidden />
-                    {gitInfo.branch}
-                    {gitInfo.ahead ? <span className="termblocks-chip-sub">↑{gitInfo.ahead}</span> : null}
-                    {gitInfo.behind ? <span className="termblocks-chip-sub">↓{gitInfo.behind}</span> : null}
-                </span>
+                <ChipPopover trigger={
+                    <span className="termblocks-chip termblocks-chip-clickable" title="git branch — click to switch">
+                        <i className="fa-solid fa-code-branch termblocks-chip-icon" aria-hidden />
+                        {gitInfo.branch}
+                        {gitInfo.ahead ? <span className="termblocks-chip-sub">↑{gitInfo.ahead}</span> : null}
+                        {gitInfo.behind ? <span className="termblocks-chip-sub">↓{gitInfo.behind}</span> : null}
+                    </span>
+                }>
+                    {(close) => (
+                        <BranchPickerContent
+                            cwd={cwd}
+                            currentBranch={gitInfo.branch}
+                            blockId={blockId}
+                            close={close}
+                        />
+                    )}
+                </ChipPopover>
             )}
-            {gitInfo?.isrepo && (gitInfo.changedfiles ?? 0) > 0 && (
-                <span className="termblocks-chip" title="uncommitted changes">
+            {hasDiff && (
+                <span
+                    className="termblocks-chip termblocks-chip-clickable"
+                    title="Open Code Review"
+                    onClick={() => {
+                        const lm = WorkspaceLayoutModel.getInstance();
+                        lm.setCodeReviewVisible(!lm.getCodeReviewVisible());
+                    }}
+                >
                     <i className="fa-regular fa-file-lines termblocks-chip-icon" aria-hidden />
                     {gitInfo.changedfiles} file{(gitInfo.changedfiles ?? 0) === 1 ? "" : "s"}
-                    {gitInfo.additions ? (
-                        <span className="termblocks-chip-add"> +{gitInfo.additions}</span>
-                    ) : null}
-                    {gitInfo.deletions ? (
-                        <span className="termblocks-chip-del"> -{gitInfo.deletions}</span>
-                    ) : null}
+                    {gitInfo.additions ? <span className="termblocks-chip-add"> +{gitInfo.additions}</span> : null}
+                    {gitInfo.deletions ? <span className="termblocks-chip-del"> -{gitInfo.deletions}</span> : null}
                 </span>
             )}
         </div>

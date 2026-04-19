@@ -10,7 +10,6 @@ import { TabBar } from "@/app/tab/tabbar";
 import { TabContent } from "@/app/tab/tabcontent";
 import { VTabBar } from "@/app/tab/vtabbar";
 import { TopBar } from "@/app/topbar/topbar";
-import { Widgets } from "@/app/workspace/widgets";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { atoms, getSettingsKeyAtom } from "@/store/global";
 import { isMacOS } from "@/util/platformutil";
@@ -34,7 +33,6 @@ const WorkspaceElem = memo(() => {
     const fileExplorerVisible = useAtomValue(workspaceLayoutModel.fileExplorerVisibleAtom);
     const codeReviewVisible = useAtomValue(workspaceLayoutModel.codeReviewVisibleAtom);
     const codeReviewWide = useAtomValue(workspaceLayoutModel.codeReviewWideAtom);
-    const widgetsSidebarVisible = useAtomValue(workspaceLayoutModel.widgetsSidebarVisibleAtom);
     const windowWidth = window.innerWidth;
     const vtabInitialPct = workspaceLayoutModel.getVTabInitialPercentage(windowWidth, showLeftTabBar);
     const vtabMinPct = workspaceLayoutModel.getVTabMinPct(windowWidth);
@@ -126,7 +124,6 @@ const WorkspaceElem = memo(() => {
                             ) : (
                                 <div className="relative flex flex-row h-full overflow-hidden">
                                     <TabContent key={tabId} tabId={tabId} noTopPadding={showLeftTabBar && isMacOS()} />
-                                    {widgetsSidebarVisible && <Widgets />}
                                     {codeReviewVisible && (
                                         <div
                                             className="absolute top-0 right-0 h-full z-10 transition-[width] duration-200"

@@ -230,15 +230,6 @@ export class TermBlocksViewModel implements ViewModel {
             const expected = row.outputendoffset - row.outputstartoffset;
             if (existing == null || existing.length < expected) {
                 this.fetchOutputFor(row);
-            } else if (existing instanceof Uint8Array && existing.length > expected) {
-                // Streaming cache accumulated bytes beyond outputendoffset (prompt
-                // text arrived in the same pty chunk as the last output bytes).
-                // The cache is NOT byte-aligned to outputstartoffset (the chunk
-                // that contained OSC C included pre-C bytes too), so slice(0,N)
-                // would cut the wrong range.  Force a re-fetch from the server
-                // which returns the authoritative [outputstartoffset,outputendoffset]
-                // range and discards the extra bytes safely.
-                this.fetchOutputFor(row);
             }
         }
     }

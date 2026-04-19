@@ -704,6 +704,20 @@ declare global {
         builderid: string;
     };
 
+    // wshrpc.CommandRunLocalCmdData
+    type CommandRunLocalCmdData = {
+        cmd: string;
+        args?: string[];
+        cwd?: string;
+    };
+
+    // wshrpc.CommandRunLocalCmdResponse
+    type CommandRunLocalCmdResponse = {
+        stdout: string;
+        stderr: string;
+        exitcode: number;
+    };
+
     // wshrpc.CommandSetMetaData
     type CommandSetMetaData = {
         oref: ORef;
@@ -1244,6 +1258,8 @@ declare global {
         "bg:activebordercolor"?: string;
         "layout:vtabbarwidth"?: number;
         "layout:widgetsvisible"?: boolean;
+        "layout:fileexplorervisible"?: boolean;
+        "layout:fileexplorerwidth"?: number;
         "waveai:panelopen"?: boolean;
         "waveai:panelwidth"?: number;
         "waveai:model"?: string;
@@ -1564,6 +1580,7 @@ declare global {
         "tsunami:sdkreplacepath"?: string;
         "tsunami:sdkversion"?: string;
         "tsunami:gopath"?: string;
+        "github:token"?: string;
     };
 
     // wshrpc.ShellHistoryResponse

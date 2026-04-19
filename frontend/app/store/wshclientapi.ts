@@ -852,6 +852,12 @@ export class RpcApiType {
         return client.wshRpcCall("routeunannounce", null, opts);
     }
 
+    // command "runlocalcmd" [call]
+    RunLocalCmdCommand(client: WshClient, data: CommandRunLocalCmdData, opts?: RpcOpts): Promise<CommandRunLocalCmdResponse> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "runlocalcmd", data, opts);
+        return client.wshRpcCall("runlocalcmd", data, opts);
+    }
+
     // command "sendtelemetry" [call]
     SendTelemetryCommand(client: WshClient, opts?: RpcOpts): Promise<void> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "sendtelemetry", null, opts);

@@ -849,6 +849,12 @@ func RouteUnannounceCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) error {
 	return err
 }
 
+// command "runlocalcmd", wshserver.RunLocalCmdCommand
+func RunLocalCmdCommand(w *wshutil.WshRpc, data wshrpc.CommandRunLocalCmdData, opts *wshrpc.RpcOpts) (*wshrpc.CommandRunLocalCmdResponse, error) {
+	resp, err := sendRpcRequestCallHelper[*wshrpc.CommandRunLocalCmdResponse](w, "runlocalcmd", data, opts)
+	return resp, err
+}
+
 // command "sendtelemetry", wshserver.SendTelemetryCommand
 func SendTelemetryCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) error {
 	_, err := sendRpcRequestCallHelper[any](w, "sendtelemetry", nil, opts)

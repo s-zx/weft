@@ -6,6 +6,7 @@ package wshserver
 // this file contains the implementation of the wsh server methods
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -14,6 +15,7 @@ import (
 	"io/fs"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -1484,6 +1486,30 @@ func (ws *WshServer) GetCmdBlocksCommand(ctx context.Context, data wshrpc.Comman
 func (ws *WshServer) GetShellHistoryCommand(ctx context.Context, data wshrpc.CommandGetShellHistoryData) (*wshrpc.ShellHistoryResponse, error) {
 	return &wshrpc.ShellHistoryResponse{
 		Lines: cmdblock.LoadShellHistory(data.Shell, data.Limit),
+	}, nil
+}
+
+func (ws *WshServer) RunLocalCmdCommand(ctx context.Context, data wshrpc.CommandRunLocalCmdData) (*wshrpc.CommandRunLocalCmdResponse, error) {
+	if data.Cmd == "" {
+		return nil, fmt.Errorf("cmd is required")
+	}
+	cmd := exec.CommandContext(ctx, data.Cmd, data.Args...)
+	if data.Cwd != "" {
+		cmd.Dir = data.Cwd
+	}
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	exitCode := 0
+	if err := cmd.Run(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		}
+	}
+	return &wshrpc.CommandRunLocalCmdResponse{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		ExitCode: exitCode,
 	}, nil
 }
 

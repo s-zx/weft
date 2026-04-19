@@ -508,6 +508,36 @@ export function initIpcHandlers() {
         event.sender.reloadIgnoringCache();
     });
 
+    // ---- Directory watching for file explorer auto-update ----
+    // fs.watch() must run in the main process (sandbox prevents Node in preload).
+    // The main process watches the path and sends `dir-changed:<path>` IPC events
+    // back to the requesting renderer.
+    const dirWatchers = new Map<string, { watcher: fs.FSWatcher; senderId: number }>();
+
+    electron.ipcMain.on("watch-dir", (event, dirPath: string) => {
+        const key = `${event.sender.id}:${dirPath}`;
+        if (dirWatchers.has(key)) return;
+        try {
+            const watcher = fs.watch(dirPath, (eventType, filename) => {
+                if (!event.sender.isDestroyed()) {
+                    event.sender.send(`dir-changed:${dirPath}`, eventType, filename ?? "");
+                }
+            });
+            dirWatchers.set(key, { watcher, senderId: event.sender.id });
+        } catch (_e) {
+            // Dir may not exist yet — silently ignore.
+        }
+    });
+
+    electron.ipcMain.on("unwatch-dir", (event, dirPath: string) => {
+        const key = `${event.sender.id}:${dirPath}`;
+        const entry = dirWatchers.get(key);
+        if (entry) {
+            entry.watcher.close();
+            dirWatchers.delete(key);
+        }
+    });
+
     electron.ipcMain.handle("save-text-file", async (event, fileName: string, content: string) => {
         const ww = electron.BrowserWindow.fromWebContents(event.sender);
         if (ww == null) {

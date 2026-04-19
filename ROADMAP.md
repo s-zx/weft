@@ -22,7 +22,7 @@
 |---|---|
 | **终端 UX** | Command Blocks + 块间导航、IDE 风输入编辑器、垂直 tab + git 元数据(branch/worktree/PR) |
 | **内置 Agent** | 多步 tool-use 循环 + Thought 流式展示、Prompt 引用文件/目录、Prompt 引用图片、追问 + 会话历史 |
-| **代码交互** | 内置文件树、内置文件编辑器 + LSP、Interactive Code Review(diff + 逐行评论 → send to agent)、Agent 修改 diff 预览确认 |
+| **代码交互** | ✅ 内置文件树、内置文件编辑器 + LSP（待）、✅ 本地 git diff Code Review 面板、Interactive Code Review 逐行评论 → send to agent（待）、Agent 修改 diff 预览确认（待） |
 | **并发** | 多 Agent 并行(cmux 风格,git worktree 隔离) |
 
 ### ❌ 明确不做 (out of scope)
@@ -340,6 +340,77 @@ git checkout -b feat/osc133-blocks upstream/main
 
 ---
 
+## M2 实际进度(截至 2026-04-19)
+
+### 内置文件树 ✅（对应 Module 7）
+
+完整实现 Warp 风格的文件浏览器，放置于 TopBar 下方的独立左侧 Panel。
+
+**核心能力：**
+- 懒加载树形视图，文件夹展开/收起，深层嵌套无限递归
+- 文件图标主题：Simple Icons 官方品牌 Logo（TS/JS/Python/Go/Rust/Docker 等），Lucide 线条图标（文件夹/通用文件/图片/视频/锁等），tree-shake 后实际 bundle ~24 KB gzip
+- **实时自动刷新**：通过 Electron 主进程 `fs.watch()` IPC 监听每个展开的目录，有文件变化时精准刷新对应目录，不刷全树
+- **智能 cwd 跟随**：同 Tab 内点击不同 block 不改变根目录；在当前 terminal 执行 `cd` 命令后立即更新；切换到新 Tab 更新为新 Tab 的 terminal cwd
+- **右键菜单**（对标 Warp）：New File、New Folder、cd to directory（注入到当前 focused terminal）、Open in new tab（新建 Wave tab + terminal）、Reveal in Finder、Rename（内联输入）、Delete、Copy Path、Copy Relative Path
+- Header 操作按钮：New File、New Folder、Close
+
+**相关文件：** `frontend/app/fileexplorer/`（新增），`pkg/waveobj/metaconsts.go`（新增 layout meta key）
+
+### TopBar 顶部工具栏 ✅（新增）
+
+替代原有 MacOSTabBarSpacer，永久展示在应用顶部（macOS 红绿灯区域右侧）。
+
+| 区域 | 内容 |
+|---|---|
+| 左 | VTabBar 切换（⌘B）、File Explorer 切换、Workspace Switcher |
+| 中 | 搜索占位符（⌘K，命令面板待实现） |
+| 右 | Code Review、Notifications（block 完成通知）、GitHub 账号 |
+
+**相关文件：** `frontend/app/topbar/topbar.tsx`（新增）
+
+### Code Review 右侧边栏 ✅（对应 Module 9 部分）
+
+本地 git diff 查看器，无需 GitHub 登录，对标 Warp 效果。
+
+- 右侧 overlay 面板（380px/全屏可切换），`position:absolute` 渲染，不触发 terminal resize
+- 文件列表：状态徽章（M/A/D）+ `+N • -N` stat + hover 操作图标（复制路径/Discard/Finder）
+- 内联展开 diff：点击文件行展开着色 diff，懒加载
+- **实时自动刷新**：`fs.watch()` 监听 `.git/` 目录和工作区根目录
+- 底层使用新增 `RunLocalCmdCommand` RPC 执行 `git status` / `git diff`
+
+**相关文件：** `frontend/app/codereview/`（新增），`pkg/wshrpc/wshserver/wshserver.go`（新增 RPC）
+
+### Notifications 面板 ✅（新增）
+
+订阅全局 `block:jobstatus` WPS 事件，terminal 命令完成时推送通知，点击可跳转到对应 block。**相关文件：** `frontend/app/notifications/`（新增）
+
+### GitHub 账号面板 ✅（新增）
+
+GitHub Token 登录，显示头像/名字，预留 PR/通知 API 扩展点。**相关文件：** `frontend/app/github/`（新增）
+
+### 布局架构简化 ✅
+
+- 移除 Wave AI Panel UI（保留后端 API 兼容 stub，避免影响已有 AI 功能）
+- 移除嵌套 inner PanelGroup，改为平坦 3 列：`[VTabBar | FileExplorer | Content]`
+- VTabBar 最小宽度 150px（react-resizable-panels minSize 原生限制）
+- ⌘B 快捷键切换 VTabBar 显示/隐藏
+
+### Shell 体验修复 ✅
+
+**PROMPT_EOL_MARK=""**：在 `pkg/shellexec/shellexec.go` 所有 shell 启动路径（local/WSL/SSH/SSH job）中对 zsh 注入 `PROMPT_EOL_MARK=""`，消除每个 block 末尾的反白 `%` 字符。
+
+**termblocks prompt 泄露修复**：done block 的 streaming cache 可能超出 `outputendoffset`（prompt 字节与最后输出 chunk 合并到达），`scheduleVisibleCheck` 现在检测并截断，消除 done block 末尾渗漏的 `# user @ ...` 和 `$`。
+
+### 新增 Go RPC
+
+`RunLocalCmdCommand(cmd, args, cwd) → {stdout, stderr, exitcode}`：服务端执行本地命令，Code Review 用此调用 `git status` / `git diff`，带 context 取消。
+
+### Electron IPC 扩展
+
+`watchDir(path, callback)` / `unwatchDir(path)`：主进程通过 `fs.watch()` 监听目录，`webContents.send` 推送事件，preload `contextBridge` 桥接给 renderer。文件树和 Code Review 的实时更新均依赖此 IPC。
+
+---
+
 ## M1 实际进度(截至 2026-04-19)
 
 按 commit 历史回填，与原计划做对齐：
@@ -413,12 +484,23 @@ git checkout -b feat/osc133-blocks upstream/main
 
 ## 下一步
 
-按文档原顺序的下一空缺，优先级建议如下：
+M2 阶段主要交付已完成（文件树、Code Review、TopBar、布局简化、Shell 修复）。当前空缺和建议优先级如下：
 
-1. **修掉 vtabs 首屏闪烁**（已知遗留 bug，反复返工，先定性收口；不解决会一直消耗时间）
-2. **M1.3 — CodeMirror 6 输入区**（M1 唯一未做的子阶段；当前 textarea 体验上会成为 M2 agent 输入的瓶颈）
-3. **M1.5 余项 — `⌘↑/↓` 块间跳转 + `⌘K` 命令面板**（小，能很快做完，让 termblocks 体验真正"Warp-like"）
-4. **M1.6 — 虚拟化 + scrollback 归档**（一旦有用户跑长输出/`tail -f` 就会被打爆，建议在进入 M2 前补上一道闸）
-5. 进入 **M2 — IDE 输入编辑器 + Agent SDK 接入 + 追问**
+### 已完成（M2 阶段）✅
+- 内置文件树（懒加载 + fs.watch 实时刷新 + 右键操作 + cwd 跟随）
+- TopBar（VTabBar/FileExplorer 切换 + Workspace Switcher + Code Review/Notifications/GitHub 入口）
+- Code Review 面板（本地 git diff，无需 GitHub 登录）
+- Block notifications（termblocks block:jobstatus 订阅）
+- 布局简化（移除 AI Panel UI，平坦 3 列 Panel）
+- Shell 修复（PROMPT_EOL_MARK + prompt 字节泄露截断）
 
-> 注：M2-M7 全是 🔷，未启动。文件树、编辑器+LSP、Diff 预览、Code Review、多 Agent worktree 都还没碰。
+### 下阶段建议优先级
+
+1. **⌘K 全局命令面板**（TopBar 搜索框当前是占位符，连接后可搜文件/命令/block 历史）
+2. **M1.3 — CodeMirror 6 输入区**（当前 textarea 是 agent 输入的体验瓶颈）
+3. **M1.5 余项 — `⌘↑/↓` 块间跳转**（小改动，提升 termblocks 导航体验）
+4. **M1.6 — per-block 虚拟化 + scrollback 归档**（`tail -f` / 大输出场景必须）
+5. **Code Review 逐行评论 → Send to Agent**（Module 9 核心差异化功能）
+6. 进入 **M3 — Agent SDK 接入 + 追问 + `@`-文件引用**
+
+> 内置编辑器 + LSP、多 Agent worktree、Diff 预览确认 均为 🔷 未开始。

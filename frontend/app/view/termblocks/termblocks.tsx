@@ -46,6 +46,7 @@ export class TermBlocksViewModel implements ViewModel {
     // Per-oid hide set for one-off "Delete block" actions.
     hiddenOidsAtom: jotai.PrimitiveAtom<Set<string>>;
     historyAtom: jotai.PrimitiveAtom<string[]>;
+    selectedOidAtom: jotai.PrimitiveAtom<string>;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
@@ -79,6 +80,7 @@ export class TermBlocksViewModel implements ViewModel {
         this.minVisibleSeqAtom = jotai.atom<number>(0) as jotai.PrimitiveAtom<number>;
         this.hiddenOidsAtom = jotai.atom<Set<string>>(new Set<string>()) as jotai.PrimitiveAtom<Set<string>>;
         this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
+        this.selectedOidAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
         this.loadShellHistory();
 
         // Ask wavesrv to (re)start the shell controller bound to this block.
@@ -160,6 +162,20 @@ export class TermBlocksViewModel implements ViewModel {
         const next = new Set(current);
         next.add(oid);
         globalStore.set(this.hiddenOidsAtom, next);
+        if (globalStore.get(this.selectedOidAtom) === oid) {
+            globalStore.set(this.selectedOidAtom, "");
+        }
+    }
+
+    selectBlock(oid: string) {
+        const current = globalStore.get(this.selectedOidAtom);
+        globalStore.set(this.selectedOidAtom, current === oid ? "" : oid);
+    }
+
+    clearSelection() {
+        if (globalStore.get(this.selectedOidAtom) !== "") {
+            globalStore.set(this.selectedOidAtom, "");
+        }
     }
 
     rerunBlock(cmd: string) {
@@ -214,6 +230,14 @@ export class TermBlocksViewModel implements ViewModel {
             const expected = row.outputendoffset - row.outputstartoffset;
             if (existing == null || existing.length < expected) {
                 this.fetchOutputFor(row);
+            } else if (existing instanceof Uint8Array && existing.length > expected) {
+                // The streaming accumulator may have captured bytes beyond
+                // outputendoffset (e.g. prompt text from the next command's
+                // precmd run, which arrives in the same pty chunk as the last
+                // output bytes).  Trim to the precise range so the xterm for
+                // this done block never renders the shell prompt ($, >, etc.).
+                const trimmed = existing.slice(0, expected);
+                globalStore.set(this.outputCacheAtom, { ...cache, [row.oid]: trimmed } as Record<string, Uint8Array>);
             }
         }
     }
@@ -721,7 +745,8 @@ const TermBlockRow: React.FC<{
     fallbackCwd: string;
     home: string;
     gitInfo: GitInfoResponse | null;
-}> = ({ block, output, model, fallbackCwd, home, gitInfo }) => {
+    selected: boolean;
+}> = ({ block, output, model, fallbackCwd, home, gitInfo, selected }) => {
     const isDone = block.state === "done";
     const isRunning = block.state === "running";
     const isError = isDone && block.exitcode != null && block.exitcode !== 0;
@@ -732,7 +757,7 @@ const TermBlockRow: React.FC<{
     const branch = gitInfo?.isrepo ? gitInfo.branch : "";
     const hasDiff = gitInfo?.isrepo && ((gitInfo.changedfiles ?? 0) > 0);
 
-    const onContextMenu = (e: React.MouseEvent) => {
+    const openMenu = (e: React.MouseEvent) => {
         e.preventDefault();
         const cmd = block.cmd ?? "";
         const outputText = output ? stripAnsiForCopy(output) : "";
@@ -788,16 +813,41 @@ const TermBlockRow: React.FC<{
         ContextMenuModel.getInstance().showContextMenu(items, e);
     };
 
+    const onClick = (e: React.MouseEvent) => {
+        // Ignore clicks that land on text selection so users can still copy
+        // output without toggling block selection.
+        const sel = window.getSelection();
+        if (sel && sel.toString().length > 0) {
+            return;
+        }
+        e.stopPropagation();
+        model.selectBlock(block.oid);
+    };
+
     return (
         <div
             className={cn(
-                "termblocks-row",
+                "termblocks-row group/row",
                 `termblocks-row-${block.state}`,
                 isError && "termblocks-row-error",
-                !showXterm && "termblocks-row-compact"
+                !showXterm && "termblocks-row-compact",
+                selected && "termblocks-row-selected"
             )}
-            onContextMenu={onContextMenu}
+            onContextMenu={openMenu}
+            onClick={onClick}
         >
+            <button
+                type="button"
+                className="termblocks-row-menu"
+                aria-label="Block options"
+                title="Block options"
+                onClick={(e) => {
+                    e.stopPropagation();
+                    openMenu(e);
+                }}
+            >
+                <i className="fa fa-solid fa-ellipsis-vertical" aria-hidden />
+            </button>
             <div className="termblocks-row-meta">
                 {cwd && <span className="termblocks-meta-cwd">{cwd}</span>}
                 {branch && (
@@ -981,7 +1031,18 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const blockMetaCwd = useAtomValue(model.blockCwdAtom);
     const home = useAtomValue(model.homeAtom);
     const gitInfo = useAtomValue(model.gitInfoAtom);
+    const selectedOid = useAtomValue(model.selectedOidAtom);
     const scrollRef = React.useRef<HTMLDivElement>(null);
+
+    React.useEffect(() => {
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape" && selectedOid) {
+                model.clearSelection();
+            }
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [model, selectedOid]);
 
     // Refresh git info the moment the block's cwd changes (cd into a repo,
     // cd out of it).  The 4s poll still covers branch switch / file edits.
@@ -1049,13 +1110,28 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
 
     return (
         <div className="termblocks-root">
-            <div className="termblocks-scroll" ref={scrollRef}>
+            <div
+                className="termblocks-scroll"
+                ref={scrollRef}
+                onClick={(e) => {
+                    if (e.target === e.currentTarget) {
+                        model.clearSelection();
+                    }
+                }}
+            >
                 {error && <div className="termblocks-empty termblocks-error">Error: {error}</div>}
                 {!error && loading && visibleBlocks.length === 0 && (
                     <div className="termblocks-empty">Loading…</div>
                 )}
                 {visibleBlocks.length > 0 && (
-                    <div className="termblocks-container">
+                    <div
+                        className="termblocks-container"
+                        onClick={(e) => {
+                            if (e.target === e.currentTarget) {
+                                model.clearSelection();
+                            }
+                        }}
+                    >
                         {visibleBlocks.map((cb) => (
                             <TermBlockRow
                                 key={cb.oid}
@@ -1065,6 +1141,7 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                                 fallbackCwd={blockMetaCwd}
                                 home={home}
                                 gitInfo={gitInfo}
+                                selected={cb.oid === selectedOid}
                             />
                         ))}
                     </div>

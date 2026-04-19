@@ -351,6 +351,9 @@
         },
         "tsunami:gopath": {
           "type": "string"
+        },
+        "github:token": {
+          "type": "string"
         }
       },
       "additionalProperties": false,

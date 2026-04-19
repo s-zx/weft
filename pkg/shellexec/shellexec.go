@@ -259,7 +259,8 @@ func StartWslShellProc(ctx context.Context, termSize waveobj.TermSize, cmdStr st
 	if shellType == shellutil.ShellType_zsh {
 		zshDir := fmt.Sprintf("~/.waveterm/%s", shellutil.ZshIntegrationDir)
 		conn.Infof(ctx, "setting ZDOTDIR to %s\n", zshDir)
-		cmdCombined = fmt.Sprintf(`ZDOTDIR=%s %s`, zshDir, cmdCombined)
+		// PROMPT_EOL_MARK='' suppresses zsh's reversed-% partial-line indicator.
+		cmdCombined = fmt.Sprintf(`ZDOTDIR=%s PROMPT_EOL_MARK='' %s`, zshDir, cmdCombined)
 	}
 	packedToken, err := cmdOpts.SwapToken.PackForClient()
 	if err != nil {
@@ -444,7 +445,8 @@ func StartRemoteShellProc(ctx context.Context, logCtx context.Context, termSize 
 	if shellType == shellutil.ShellType_zsh {
 		zshDir := fmt.Sprintf("~/.waveterm/%s", shellutil.ZshIntegrationDir)
 		conn.Infof(logCtx, "setting ZDOTDIR to %s\n", zshDir)
-		cmdCombined = fmt.Sprintf(`ZDOTDIR=%s %s`, zshDir, cmdCombined)
+		// PROMPT_EOL_MARK='' suppresses zsh's reversed-% partial-line indicator.
+		cmdCombined = fmt.Sprintf(`ZDOTDIR=%s PROMPT_EOL_MARK='' %s`, zshDir, cmdCombined)
 	}
 	packedToken, err := cmdOpts.SwapToken.PackForClient()
 	if err != nil {
@@ -546,6 +548,8 @@ func StartRemoteShellJob(ctx context.Context, logCtx context.Context, termSize w
 		zshDir := fmt.Sprintf("%s/.waveterm/%s", remoteInfo.HomeDir, shellutil.ZshIntegrationDir)
 		conn.Infof(logCtx, "setting ZDOTDIR to %s\n", zshDir)
 		env["ZDOTDIR"] = zshDir
+		// PROMPT_EOL_MARK="" suppresses zsh's reversed-% partial-line indicator.
+		env["PROMPT_EOL_MARK"] = ""
 	}
 	if cmdOpts.SwapToken != nil {
 		packedToken, err := cmdOpts.SwapToken.PackForClient()
@@ -621,7 +625,13 @@ func StartLocalShellProc(logCtx context.Context, termSize waveobj.TermSize, cmdS
 		ecmd = exec.Command(shellPath, shellOpts...)
 		ecmd.Env = os.Environ()
 		if shellType == shellutil.ShellType_zsh {
-			shellutil.UpdateCmdEnv(ecmd, map[string]string{"ZDOTDIR": shellutil.GetLocalZshZDotDir()})
+			// PROMPT_EOL_MARK="" suppresses zsh's default reversed-% indicator
+			// for output that doesn't end in a newline — UX fix so users don't
+			// need to set it in their own .zshrc.
+			shellutil.UpdateCmdEnv(ecmd, map[string]string{
+				"ZDOTDIR":          shellutil.GetLocalZshZDotDir(),
+				"PROMPT_EOL_MARK":  "",
+			})
 		}
 	} else {
 		isShell = false

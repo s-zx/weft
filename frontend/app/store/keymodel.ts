@@ -735,9 +735,9 @@ function registerGlobalKeys() {
         }
         return false;
     });
-    globalKeyMap.set("Cmd:Shift:a", () => {
-        const currentVisible = WorkspaceLayoutModel.getInstance().getAIPanelVisible();
-        WorkspaceLayoutModel.getInstance().setAIPanelVisible(!currentVisible);
+    globalKeyMap.set("Cmd:b", () => {
+        const model = WorkspaceLayoutModel.getInstance();
+        model.setVTabVisible(!model.getVTabVisible());
         return true;
     });
     const allKeys = Array.from(globalKeyMap.keys());

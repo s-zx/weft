@@ -73,6 +73,18 @@ contextBridge.exposeInMainWorld("api", {
     getPathForFile: (file: File): string => webUtils.getPathForFile(file),
     saveTextFile: (fileName: string, content: string) => ipcRenderer.invoke("save-text-file", fileName, content),
     setIsActive: () => ipcRenderer.invoke("set-is-active"),
+    watchDir: (path: string, callback: (eventType: string, filename: string) => void): void => {
+        // Ask the main process to start watching; listen for change events it sends back.
+        ipcRenderer.send("watch-dir", path);
+        // Register only once per path — deduplicated on the main-process side.
+        ipcRenderer.on(`dir-changed:${path}`, (_event, eventType: string, filename: string) => {
+            callback(eventType, filename);
+        });
+    },
+    unwatchDir: (path: string): void => {
+        ipcRenderer.send("unwatch-dir", path);
+        ipcRenderer.removeAllListeners(`dir-changed:${path}`);
+    },
 });
 
 // Custom event for "new-window"

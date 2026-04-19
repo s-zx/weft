@@ -1,76 +1,79 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveAIModel } from "@/app/aipanel/waveai-model";
 import { globalStore } from "@/app/store/jotaiStore";
 import { isBuilderWindow } from "@/app/store/windowtype";
 import * as WOS from "@/app/store/wos";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
-import { atoms, getApi, getOrefMetaKeyAtom, getSettingsKeyAtom, recordTEvent, refocusNode } from "@/store/global";
-import debug from "debug";
+import { atoms, getOrefMetaKeyAtom, getSettingsKeyAtom, refocusNode } from "@/store/global";
 import * as jotai from "jotai";
 import { debounce } from "lodash-es";
 import { ImperativePanelGroupHandle, ImperativePanelHandle } from "react-resizable-panels";
 
-const dlog = debug("wave:workspace");
-
-const AIPanel_DefaultWidth = 300;
-const AIPanel_DefaultWidthRatio = 0.33;
-const AIPanel_MinWidth = 300;
-const AIPanel_MaxWidthRatio = 0.66;
-
 const VTabBar_DefaultWidth = 220;
-const VTabBar_MinWidth = 110;
-const VTabBar_MaxWidth = 280;
+const VTabBar_MinWidth = 150;
+const VTabBar_MaxWidth = 320;
+
+const FileExplorer_DefaultWidth = 260;
+const FileExplorer_MinWidth = 180;
+const FileExplorer_MaxWidthRatio = 0.5;
 
 function clampVTabWidth(w: number): number {
     return Math.max(VTabBar_MinWidth, Math.min(w, VTabBar_MaxWidth));
 }
 
-function clampAIPanelWidth(w: number, windowWidth: number): number {
-    const maxWidth = Math.floor(windowWidth * AIPanel_MaxWidthRatio);
-    if (AIPanel_MinWidth > maxWidth) return AIPanel_MinWidth;
-    return Math.max(AIPanel_MinWidth, Math.min(w, maxWidth));
+function clampFileExplorerWidth(w: number, windowWidth: number): number {
+    const maxWidth = Math.floor(windowWidth * FileExplorer_MaxWidthRatio);
+    if (FileExplorer_MinWidth > maxWidth) return FileExplorer_MinWidth;
+    return Math.max(FileExplorer_MinWidth, Math.min(w, maxWidth));
 }
 
 class WorkspaceLayoutModel {
     private static instance: WorkspaceLayoutModel | null = null;
 
-    aiPanelRef: ImperativePanelHandle | null;
     vtabPanelRef: ImperativePanelHandle | null;
+    fileExplorerPanelRef: ImperativePanelHandle | null;
     outerPanelGroupRef: ImperativePanelGroupHandle | null;
-    innerPanelGroupRef: ImperativePanelGroupHandle | null;
     panelContainerRef: HTMLDivElement | null;
-    aiPanelWrapperRef: HTMLDivElement | null;
     vtabPanelWrapperRef: HTMLDivElement | null;
+    fileExplorerWrapperRef: HTMLDivElement | null;
+
+    vtabVisibleAtom: jotai.PrimitiveAtom<boolean>;
+    fileExplorerVisibleAtom: jotai.PrimitiveAtom<boolean>;
+    codeReviewVisibleAtom: jotai.PrimitiveAtom<boolean>;
+    codeReviewWideAtom: jotai.PrimitiveAtom<boolean>;
+    // Kept for backward-compat with code that still imports the AI panel atom.
+    // We no longer render the AI panel, so this stays permanently false.
     panelVisibleAtom: jotai.PrimitiveAtom<boolean>;
 
     private inResize: boolean;
-    private aiPanelVisible: boolean;
-    private aiPanelWidth: number | null;
     private vtabWidth: number;
     private vtabVisible: boolean;
+    private fileExplorerVisible: boolean;
+    private fileExplorerWidth: number | null;
     private transitionTimeoutRef: NodeJS.Timeout | null = null;
-    private focusTimeoutRef: NodeJS.Timeout | null = null;
-    private debouncedPersistAIWidth: () => void;
     private debouncedPersistVTabWidth: () => void;
+    private debouncedPersistFileExplorerWidth: () => void;
     widgetsSidebarVisibleAtom: jotai.Atom<boolean>;
 
     private constructor() {
-        this.aiPanelRef = null;
         this.vtabPanelRef = null;
+        this.fileExplorerPanelRef = null;
         this.outerPanelGroupRef = null;
-        this.innerPanelGroupRef = null;
         this.panelContainerRef = null;
-        this.aiPanelWrapperRef = null;
         this.vtabPanelWrapperRef = null;
+        this.fileExplorerWrapperRef = null;
         this.inResize = false;
-        this.aiPanelVisible = false;
-        this.aiPanelWidth = null;
         this.vtabWidth = VTabBar_DefaultWidth;
         this.vtabVisible = false;
+        this.fileExplorerVisible = true;
+        this.fileExplorerWidth = null;
+        this.vtabVisibleAtom = jotai.atom(false);
+        this.fileExplorerVisibleAtom = jotai.atom(true);
+        this.codeReviewVisibleAtom = jotai.atom(false);
+        this.codeReviewWideAtom = jotai.atom(false);
         this.panelVisibleAtom = jotai.atom(false);
         this.widgetsSidebarVisibleAtom = jotai.atom(
             (get) =>
@@ -81,21 +84,6 @@ class WorkspaceLayoutModel {
 
         this.handleWindowResize = this.handleWindowResize.bind(this);
         this.handleOuterPanelLayout = this.handleOuterPanelLayout.bind(this);
-        this.handleInnerPanelLayout = this.handleInnerPanelLayout.bind(this);
-
-        this.debouncedPersistAIWidth = debounce(() => {
-            if (!this.aiPanelVisible) return;
-            const width = this.aiPanelWrapperRef?.offsetWidth;
-            if (width == null || width <= 0) return;
-            try {
-                RpcApi.SetMetaCommand(TabRpcClient, {
-                    oref: WOS.makeORef("tab", this.getTabId()),
-                    meta: { "waveai:panelwidth": width },
-                });
-            } catch (e) {
-                console.warn("Failed to persist AI panel width:", e);
-            }
-        }, 300);
 
         this.debouncedPersistVTabWidth = debounce(() => {
             if (!this.vtabVisible) return;
@@ -110,6 +98,20 @@ class WorkspaceLayoutModel {
                 console.warn("Failed to persist vtabbar width:", e);
             }
         }, 300);
+
+        this.debouncedPersistFileExplorerWidth = debounce(() => {
+            if (!this.fileExplorerVisible) return;
+            const width = this.fileExplorerWrapperRef?.offsetWidth;
+            if (width == null || width <= 0) return;
+            try {
+                RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: WOS.makeORef("workspace", this.getWorkspaceId()),
+                    meta: { "layout:fileexplorerwidth": width },
+                });
+            } catch (e) {
+                console.warn("Failed to persist file explorer width:", e);
+            }
+        }, 300);
     }
 
     static getInstance(): WorkspaceLayoutModel {
@@ -121,161 +123,105 @@ class WorkspaceLayoutModel {
 
     // ---- Meta / persistence helpers ----
 
-    private getTabId(): string {
-        return globalStore.get(atoms.staticTabId);
-    }
-
     private getWorkspaceId(): string {
         return globalStore.get(atoms.workspace)?.oid ?? "";
-    }
-
-    private getPanelOpenAtom(): jotai.Atom<boolean> {
-        return getOrefMetaKeyAtom(WOS.makeORef("tab", this.getTabId()), "waveai:panelopen");
-    }
-
-    private getPanelWidthAtom(): jotai.Atom<number> {
-        return getOrefMetaKeyAtom(WOS.makeORef("tab", this.getTabId()), "waveai:panelwidth");
     }
 
     private getVTabBarWidthAtom(): jotai.Atom<number> {
         return getOrefMetaKeyAtom(WOS.makeORef("workspace", this.getWorkspaceId()), "layout:vtabbarwidth");
     }
 
+    private getFileExplorerVisibleAtom(): jotai.Atom<boolean> {
+        return getOrefMetaKeyAtom(WOS.makeORef("workspace", this.getWorkspaceId()), "layout:fileexplorervisible");
+    }
+
+    private getFileExplorerWidthAtom(): jotai.Atom<number> {
+        return getOrefMetaKeyAtom(WOS.makeORef("workspace", this.getWorkspaceId()), "layout:fileexplorerwidth");
+    }
+
     private initializeFromMeta(): void {
         try {
-            const savedVisible = globalStore.get(this.getPanelOpenAtom());
-            const savedAIWidth = globalStore.get(this.getPanelWidthAtom());
             const savedVTabWidth = globalStore.get(this.getVTabBarWidthAtom());
-            if (savedVisible != null) {
-                this.aiPanelVisible = savedVisible;
-                globalStore.set(this.panelVisibleAtom, savedVisible);
-            }
-            if (savedAIWidth != null) {
-                this.aiPanelWidth = savedAIWidth;
-            }
+            const savedFileExplorerVisible = globalStore.get(this.getFileExplorerVisibleAtom());
+            const savedFileExplorerWidth = globalStore.get(this.getFileExplorerWidthAtom());
             if (savedVTabWidth != null && savedVTabWidth > 0) {
                 this.vtabWidth = savedVTabWidth;
+            }
+            if (savedFileExplorerVisible != null) {
+                this.fileExplorerVisible = savedFileExplorerVisible;
+                globalStore.set(this.fileExplorerVisibleAtom, savedFileExplorerVisible);
+            }
+            if (savedFileExplorerWidth != null && savedFileExplorerWidth > 0) {
+                this.fileExplorerWidth = savedFileExplorerWidth;
             }
             const tabBarPosition = globalStore.get(getSettingsKeyAtom("app:tabbar")) ?? "top";
             const showLeftTabBar = tabBarPosition === "left" && !isBuilderWindow();
             this.vtabVisible = showLeftTabBar;
+            globalStore.set(this.vtabVisibleAtom, showLeftTabBar);
         } catch (e) {
             console.warn("Failed to initialize from tab meta:", e);
         }
     }
 
-    // ---- Resolved width getters (always clamped) ----
-
-    private getResolvedAIWidth(windowWidth: number): number {
-        let w = this.aiPanelWidth;
-        if (w == null) {
-            w = Math.max(AIPanel_DefaultWidth, windowWidth * AIPanel_DefaultWidthRatio);
-            this.aiPanelWidth = w;
-        }
-        return clampAIPanelWidth(w, windowWidth);
-    }
+    // ---- Resolved widths ----
 
     private getResolvedVTabWidth(): number {
         return clampVTabWidth(this.vtabWidth);
     }
 
-    // ---- Core layout computation ----
-    // All layout decisions flow through computeLayout.
-    // It takes the current state (visibility flags + stored px widths)
-    // and produces the two percentage arrays for the panel groups.
-
-    private computeLayout(windowWidth: number): { outer: number[]; inner: number[] } {
-        const vtabW = this.vtabVisible ? this.getResolvedVTabWidth() : 0;
-        const aiW = this.aiPanelVisible ? this.getResolvedAIWidth(windowWidth) : 0;
-        const leftGroupW = vtabW + aiW;
-
-        // outer: [leftGroupPct, contentPct]
-        const leftPct = windowWidth > 0 ? (leftGroupW / windowWidth) * 100 : 0;
-        const contentPct = Math.max(0, 100 - leftPct);
-
-        // inner: [vtabPct, aiPanelPct] relative to leftGroupW
-        let vtabPct: number;
-        let aiPct: number;
-        if (leftGroupW > 0) {
-            vtabPct = (vtabW / leftGroupW) * 100;
-            aiPct = 100 - vtabPct;
-        } else {
-            vtabPct = 50;
-            aiPct = 50;
+    private getResolvedFileExplorerWidth(windowWidth: number): number {
+        let w = this.fileExplorerWidth;
+        if (w == null) {
+            w = FileExplorer_DefaultWidth;
+            this.fileExplorerWidth = w;
         }
+        return clampFileExplorerWidth(w, windowWidth);
+    }
 
-        return { outer: [leftPct, contentPct], inner: [vtabPct, aiPct] };
+    // ---- Layout ----
+
+    private computeLayout(windowWidth: number): number[] {
+        const vtabW = this.vtabVisible ? this.getResolvedVTabWidth() : 0;
+        const feW = this.fileExplorerVisible ? this.getResolvedFileExplorerWidth(windowWidth) : 0;
+        const vtabPct = windowWidth > 0 ? (vtabW / windowWidth) * 100 : 0;
+        const fePct = windowWidth > 0 ? (feW / windowWidth) * 100 : 0;
+        const contentPct = Math.max(0, 100 - vtabPct - fePct);
+        return [vtabPct, fePct, contentPct];
     }
 
     private commitLayouts(windowWidth: number): void {
-        if (!this.outerPanelGroupRef || !this.innerPanelGroupRef) return;
-        const { outer, inner } = this.computeLayout(windowWidth);
+        if (!this.outerPanelGroupRef) return;
+        const layout = this.computeLayout(windowWidth);
         this.inResize = true;
-        // react-resizable-panels throws if the sizes array length doesn't
-        // match the current number of visible Panel children. During HMR
-        // or the first frame after toggling vtab/aipanel visibility the
-        // refs can briefly point to a group with 0 or 1 panels while we
-        // still pass 2 sizes. Swallow the validation error instead of
-        // surfacing it as an uncaught exception.
         try {
-            this.outerPanelGroupRef.setLayout(outer);
+            this.outerPanelGroupRef.setLayout(layout);
         } catch (e) {
-            // ignore transient layout mismatch
-        }
-        try {
-            this.innerPanelGroupRef.setLayout(inner);
-        } catch (e) {
-            // ignore transient layout mismatch
+            // ignore transient layout mismatch (HMR / panel count changes)
         }
         this.inResize = false;
-        this.updateWrapperWidth();
     }
-
-    // ---- Drag handlers ----
-    // These convert the percentage-based callback from react-resizable-panels
-    // back into pixel widths, update stored state, then re-commit.
 
     handleOuterPanelLayout(sizes: number[]): void {
         if (this.inResize) return;
+        if (sizes.length < 3) return;
         const windowWidth = window.innerWidth;
-        const newLeftGroupPx = (sizes[0] / 100) * windowWidth;
+        const newVTabPx = (sizes[0] / 100) * windowWidth;
+        const newFePx = (sizes[1] / 100) * windowWidth;
 
-        if (this.vtabVisible && this.aiPanelVisible) {
-            // vtab stays constant, aipanel absorbs the change
-            const vtabW = this.getResolvedVTabWidth();
-            this.aiPanelWidth = clampAIPanelWidth(newLeftGroupPx - vtabW, windowWidth);
-            this.debouncedPersistAIWidth();
-        } else if (this.vtabVisible) {
-            this.vtabWidth = clampVTabWidth(newLeftGroupPx);
-            this.debouncedPersistVTabWidth();
-        } else if (this.aiPanelVisible) {
-            this.aiPanelWidth = clampAIPanelWidth(newLeftGroupPx, windowWidth);
-            this.debouncedPersistAIWidth();
+        if (this.vtabVisible) {
+            const clamped = clampVTabWidth(newVTabPx);
+            if (clamped !== this.vtabWidth) {
+                this.vtabWidth = clamped;
+                this.debouncedPersistVTabWidth();
+            }
         }
 
-        this.commitLayouts(windowWidth);
-    }
-
-    handleInnerPanelLayout(sizes: number[]): void {
-        if (this.inResize) return;
-        if (!this.vtabVisible || !this.aiPanelVisible) return;
-
-        const windowWidth = window.innerWidth;
-        const vtabW = this.getResolvedVTabWidth();
-        const aiW = this.getResolvedAIWidth(windowWidth);
-        const leftGroupW = vtabW + aiW;
-
-        const newVTabW = (sizes[0] / 100) * leftGroupW;
-        const clampedVTab = clampVTabWidth(newVTabW);
-        const newAIW = clampAIPanelWidth(leftGroupW - clampedVTab, windowWidth);
-
-        if (clampedVTab !== this.vtabWidth) {
-            this.vtabWidth = clampedVTab;
-            this.debouncedPersistVTabWidth();
-        }
-        if (newAIW !== this.aiPanelWidth) {
-            this.aiPanelWidth = newAIW;
-            this.debouncedPersistAIWidth();
+        if (this.fileExplorerVisible) {
+            const clamped = clampFileExplorerWidth(newFePx, windowWidth);
+            if (clamped !== this.fileExplorerWidth) {
+                this.fileExplorerWidth = clamped;
+                this.debouncedPersistFileExplorerWidth();
+            }
         }
 
         this.commitLayouts(windowWidth);
@@ -284,8 +230,6 @@ class WorkspaceLayoutModel {
     handleWindowResize(): void {
         this.commitLayouts(window.innerWidth);
     }
-
-    // ---- Registration & sync ----
 
     syncVTabWidthFromMeta(): void {
         const savedVTabWidth = globalStore.get(this.getVTabBarWidthAtom());
@@ -296,45 +240,38 @@ class WorkspaceLayoutModel {
     }
 
     registerRefs(
-        aiPanelRef: ImperativePanelHandle,
         outerPanelGroupRef: ImperativePanelGroupHandle,
-        innerPanelGroupRef: ImperativePanelGroupHandle,
         panelContainerRef: HTMLDivElement,
-        aiPanelWrapperRef: HTMLDivElement,
         vtabPanelRef?: ImperativePanelHandle,
         vtabPanelWrapperRef?: HTMLDivElement,
-        showLeftTabBar?: boolean
+        showLeftTabBar?: boolean,
+        fileExplorerPanelRef?: ImperativePanelHandle,
+        fileExplorerWrapperRef?: HTMLDivElement
     ): void {
-        this.aiPanelRef = aiPanelRef;
-        this.vtabPanelRef = vtabPanelRef ?? null;
         this.outerPanelGroupRef = outerPanelGroupRef;
-        this.innerPanelGroupRef = innerPanelGroupRef;
         this.panelContainerRef = panelContainerRef;
-        this.aiPanelWrapperRef = aiPanelWrapperRef;
+        this.vtabPanelRef = vtabPanelRef ?? null;
         this.vtabPanelWrapperRef = vtabPanelWrapperRef ?? null;
-        this.vtabVisible = showLeftTabBar ?? false;
+        this.fileExplorerPanelRef = fileExplorerPanelRef ?? null;
+        this.fileExplorerWrapperRef = fileExplorerWrapperRef ?? null;
+        if (showLeftTabBar != null) {
+            this.vtabVisible = showLeftTabBar;
+            globalStore.set(this.vtabVisibleAtom, showLeftTabBar);
+        }
         this.syncPanelCollapse();
         this.commitLayouts(window.innerWidth);
     }
 
     private syncPanelCollapse(): void {
-        if (this.aiPanelRef) {
-            if (this.aiPanelVisible) {
-                this.aiPanelRef.expand();
-            } else {
-                this.aiPanelRef.collapse();
-            }
-        }
         if (this.vtabPanelRef) {
-            if (this.vtabVisible) {
-                this.vtabPanelRef.expand();
-            } else {
-                this.vtabPanelRef.collapse();
-            }
+            if (this.vtabVisible) this.vtabPanelRef.expand();
+            else this.vtabPanelRef.collapse();
+        }
+        if (this.fileExplorerPanelRef) {
+            if (this.fileExplorerVisible) this.fileExplorerPanelRef.expand();
+            else this.fileExplorerPanelRef.collapse();
         }
     }
-
-    // ---- Transitions ----
 
     enableTransitions(duration: number): void {
         if (!this.panelContainerRef) return;
@@ -342,9 +279,7 @@ class WorkspaceLayoutModel {
         panels.forEach((panel: HTMLElement) => {
             panel.style.transition = "flex 0.2s ease-in-out";
         });
-        if (this.transitionTimeoutRef) {
-            clearTimeout(this.transitionTimeoutRef);
-        }
+        if (this.transitionTimeoutRef) clearTimeout(this.transitionTimeoutRef);
         this.transitionTimeoutRef = setTimeout(() => {
             if (!this.panelContainerRef) return;
             const panels = this.panelContainerRef.querySelectorAll("[data-panel]");
@@ -354,98 +289,116 @@ class WorkspaceLayoutModel {
         }, duration);
     }
 
-    // ---- Wrapper width (AI panel inner content width) ----
+    // ---- Initial percentages + min sizes (used by workspace.tsx) ----
 
-    updateWrapperWidth(): void {
-        if (!this.aiPanelWrapperRef) return;
-        const width = this.getResolvedAIWidth(window.innerWidth);
-        this.aiPanelWrapperRef.style.width = `${width}px`;
+    getVTabInitialPercentage(windowWidth: number, showLeftTabBar: boolean): number {
+        if (!showLeftTabBar || isBuilderWindow() || !this.vtabVisible) return 0;
+        return (this.getResolvedVTabWidth() / windowWidth) * 100;
+    }
+
+    getFileExplorerInitialPercentage(windowWidth: number): number {
+        if (!this.fileExplorerVisible) return 0;
+        return (this.getResolvedFileExplorerWidth(windowWidth) / windowWidth) * 100;
+    }
+
+    getContentInitialPercentage(windowWidth: number, showLeftTabBar: boolean): number {
+        return Math.max(
+            0,
+            100 -
+                this.getVTabInitialPercentage(windowWidth, showLeftTabBar) -
+                this.getFileExplorerInitialPercentage(windowWidth)
+        );
+    }
+
+    getVTabMinPct(windowWidth: number): number {
+        return windowWidth > 0 ? (VTabBar_MinWidth / windowWidth) * 100 : 0;
+    }
+
+    getFileExplorerMinPct(windowWidth: number): number {
+        return windowWidth > 0 ? (FileExplorer_MinWidth / windowWidth) * 100 : 0;
     }
 
     // ---- Public getters ----
 
-    getAIPanelVisible(): boolean {
-        return this.aiPanelVisible;
+    getVTabVisible(): boolean {
+        return this.vtabVisible;
     }
 
-    getAIPanelWidth(): number {
-        return this.getResolvedAIWidth(window.innerWidth);
+    getFileExplorerVisible(): boolean {
+        return this.fileExplorerVisible;
     }
 
-    // ---- Initial percentage helpers (used by workspace.tsx for defaultSize) ----
+    // ---- Toggle / visibility ----
 
-    getLeftGroupInitialPercentage(windowWidth: number, showLeftTabBar: boolean): number {
-        const vtabW = showLeftTabBar && !isBuilderWindow() ? this.getResolvedVTabWidth() : 0;
-        const aiW = this.aiPanelVisible ? this.getResolvedAIWidth(windowWidth) : 0;
-        return ((vtabW + aiW) / windowWidth) * 100;
-    }
-
-    getInnerVTabInitialPercentage(windowWidth: number, showLeftTabBar: boolean): number {
-        if (!showLeftTabBar || isBuilderWindow()) return 0;
-        const vtabW = this.getResolvedVTabWidth();
-        const aiW = this.aiPanelVisible ? this.getResolvedAIWidth(windowWidth) : 0;
-        const total = vtabW + aiW;
-        if (total === 0) return 50;
-        return (vtabW / total) * 100;
-    }
-
-    getInnerAIPanelInitialPercentage(windowWidth: number, showLeftTabBar: boolean): number {
-        const vtabW = showLeftTabBar && !isBuilderWindow() ? this.getResolvedVTabWidth() : 0;
-        const aiW = this.aiPanelVisible ? this.getResolvedAIWidth(windowWidth) : 0;
-        const total = vtabW + aiW;
-        if (total === 0) return 50;
-        return (aiW / total) * 100;
-    }
-
-    // ---- Toggle visibility ----
-
-    setAIPanelVisible(visible: boolean, opts?: { nofocus?: boolean }): void {
-        if (this.focusTimeoutRef != null) {
-            clearTimeout(this.focusTimeoutRef);
-            this.focusTimeoutRef = null;
+    setVTabVisible(visible: boolean): void {
+        const changed = this.vtabVisible !== visible;
+        if (changed) {
+            this.vtabVisible = visible;
+            globalStore.set(this.vtabVisibleAtom, visible);
+            this.enableTransitions(200);
         }
-        const wasVisible = this.aiPanelVisible;
-        this.aiPanelVisible = visible;
-        if (visible && !wasVisible) {
-            recordTEvent("action:openwaveai");
-        }
-        globalStore.set(this.panelVisibleAtom, visible);
-        getApi().setWaveAIOpen(visible);
-        RpcApi.SetMetaCommand(TabRpcClient, {
-            oref: WOS.makeORef("tab", this.getTabId()),
-            meta: { "waveai:panelopen": visible },
-        });
-        this.enableTransitions(250);
         this.syncPanelCollapse();
         this.commitLayouts(window.innerWidth);
+    }
 
-        if (visible) {
-            if (!opts?.nofocus) {
-                this.focusTimeoutRef = setTimeout(() => {
-                    WaveAIModel.getInstance().focusInput();
-                    this.focusTimeoutRef = null;
-                }, 350);
+    setFileExplorerVisible(visible: boolean): void {
+        const changed = this.fileExplorerVisible !== visible;
+        if (changed) {
+            this.fileExplorerVisible = visible;
+            globalStore.set(this.fileExplorerVisibleAtom, visible);
+            try {
+                RpcApi.SetMetaCommand(TabRpcClient, {
+                    oref: WOS.makeORef("workspace", this.getWorkspaceId()),
+                    meta: { "layout:fileexplorervisible": visible },
+                });
+            } catch (e) {
+                console.warn("Failed to persist file explorer visibility:", e);
             }
-        } else {
-            const layoutModel = getLayoutModelForStaticTab();
-            const focusedNode = globalStore.get(layoutModel.focusedNode);
-            if (focusedNode == null) {
-                layoutModel.focusFirstNode();
-                return;
-            }
-            const blockId = focusedNode?.data?.blockId;
-            if (blockId != null) {
-                refocusNode(blockId);
-            }
+            this.enableTransitions(200);
         }
+        // Always re-sync panel collapse + layout so a stray out-of-sync state
+        // from HMR or rapid clicks still converges on the desired state.
+        this.syncPanelCollapse();
+        this.commitLayouts(window.innerWidth);
     }
 
     setShowLeftTabBar(showLeftTabBar: boolean): void {
         if (this.vtabVisible === showLeftTabBar) return;
         this.vtabVisible = showLeftTabBar;
-        this.enableTransitions(250);
+        globalStore.set(this.vtabVisibleAtom, showLeftTabBar);
+        this.enableTransitions(200);
         this.syncPanelCollapse();
         this.commitLayouts(window.innerWidth);
+    }
+
+    setCodeReviewVisible(visible: boolean): void {
+        globalStore.set(this.codeReviewVisibleAtom, visible);
+    }
+
+    getCodeReviewVisible(): boolean {
+        return globalStore.get(this.codeReviewVisibleAtom);
+    }
+
+    // ---- AI panel stubs (UI removed; keep API for older callers) ----
+
+    getAIPanelVisible(): boolean {
+        return false;
+    }
+
+    getAIPanelWidth(): number {
+        return 0;
+    }
+
+    setAIPanelVisible(_visible: boolean, _opts?: { nofocus?: boolean }): void {
+        // Wave AI panel removed from UI. Kept as a no-op so lingering callers
+        // (termmodel / blockframe / etc.) don't crash. Refocus the current
+        // block so the caller's intent (regain focus) still works.
+        const layoutModel = getLayoutModelForStaticTab();
+        const focusedNode = globalStore.get(layoutModel.focusedNode);
+        const blockId = focusedNode?.data?.blockId;
+        if (blockId != null) {
+            refocusNode(blockId);
+        }
     }
 }
 

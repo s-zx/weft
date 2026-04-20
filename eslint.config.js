@@ -25,7 +25,6 @@ export default [
             "**/build/**",
             "**/make/**",
             "tsunami/frontend/scaffold/**",
-            "docs/.docusaurus/**",
         ],
     },
 
@@ -39,13 +38,6 @@ export default [
         },
     },
 
-    {
-        files: ["docs/**/*.{ts,tsx}"],
-        languageOptions: {
-            parserOptions: { tsconfigRootDir, project: "./docs/tsconfig.json" },
-        },
-    },
-
     eslint.configs.recommended,
     ...tseslint.configs.recommended,
 
@@ -56,7 +48,7 @@ export default [
     },
 
     {
-        files: ["emain/**/*.ts", "electron.vite.config.ts", "**/*.cjs", "eslint.config.js", "docs/babel.config.js"],
+        files: ["emain/**/*.ts", "electron.vite.config.ts", "**/*.cjs", "eslint.config.js"],
         languageOptions: {
             globals: {
                 ...globals.node,

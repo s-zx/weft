@@ -1,4 +1,39 @@
 .termblocks-root {
+    // Theme tokens are declared on the view root so a future theme system
+    // can override them at a higher scope (body/data-theme) without touching
+    // component code.  Keep this the single source of truth for colors used
+    // inside the termblocks view.
+    --tb-accent: #b8f2c0;
+    --tb-running: #40c4ff;
+    --tb-error: #e57373;
+    --tb-diff-add: #4caf50;
+    --tb-diff-del: #e57373;
+
+    --tb-surface-idle: rgba(255, 255, 255, 0.015);
+    --tb-surface-hover: rgba(255, 255, 255, 0.035);
+    --tb-surface-selected: rgba(184, 242, 192, 0.06);
+    --tb-surface-selected-border: rgba(184, 242, 192, 0.2);
+    --tb-row-radius: 0;
+    --tb-row-gap: 4px;
+
+    --tb-text-secondary: rgba(255, 255, 255, 0.45);
+    --tb-text-meta-cwd: rgba(255, 255, 255, 0.55);
+    --tb-text-meta-diff: rgba(255, 255, 255, 0.55);
+
+    --tb-tok-cmd: var(--tb-accent);
+    --tb-tok-flag: #89ddff;
+    --tb-tok-string: #f5c45c;
+    --tb-tok-var: #c792ea;
+    --tb-tok-comment: rgba(255, 255, 255, 0.4);
+    --tb-tok-op: #ff8787;
+    --tb-tok-path: #e6e6e6;
+    --tb-tok-text: rgba(230, 230, 230, 0.92);
+    --tb-tok-ghost: rgba(255, 255, 255, 0.28);
+
+    --tb-bar-bg: rgba(0, 0, 0, 0.28);
+    --tb-bar-border: rgba(255, 255, 255, 0.06);
+    --tb-statusbar-bg: rgba(0, 0, 0, 0.22);
+
     display: flex;
     flex-direction: column;
     height: 100%;
@@ -17,7 +52,7 @@
 .termblocks-container {
     display: flex;
     flex-direction: column;
-    padding: 0;
+    gap: var(--tb-row-gap);
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
 }
@@ -34,16 +69,19 @@
 }
 
 .termblocks-error {
-    color: #e57373;
+    color: var(--tb-error);
 }
 
 .termblocks-row {
     position: relative;
     padding: 8px 20px 8px 20px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+    background: var(--tb-surface-idle);
+    border-radius: var(--tb-row-radius);
+    overflow: hidden;
+    transition: background 120ms ease;
 
-    &:last-child {
-        border-bottom: none;
+    &:hover {
+        background: var(--tb-surface-hover);
     }
 }
 
@@ -67,12 +105,47 @@
 }
 
 .termblocks-row-running::before {
-    background: #40c4ff;
+    background: var(--tb-running);
     animation: termblocks-pulse-bar 1.4s ease-in-out infinite;
 }
 
 .termblocks-row-error::before {
-    background: #e57373;
+    background: var(--tb-error);
+}
+
+.termblocks-row-menu {
+    position: absolute;
+    top: 6px;
+    right: 10px;
+    width: 22px;
+    height: 22px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    border-radius: 4px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
+    font-size: 12px;
+    z-index: 2;
+}
+
+.termblocks-row:hover .termblocks-row-menu,
+.termblocks-row-selected .termblocks-row-menu {
+    opacity: 1;
+}
+
+.termblocks-row-menu:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.termblocks-row-selected {
+    background: var(--tb-surface-selected);
+    box-shadow: inset 0 0 0 1px var(--tb-surface-selected-border);
 }
 
 @keyframes termblocks-pulse-bar {
@@ -90,34 +163,34 @@
     align-items: center;
     gap: 8px;
     font-size: 11px;
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--tb-text-secondary);
     margin-bottom: 1px;
     line-height: 1.3;
 }
 
 .termblocks-meta-cwd {
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--tb-text-meta-cwd);
 }
 
 .termblocks-meta-git {
-    color: rgba(255, 255, 255, 0.45);
+    color: var(--tb-text-secondary);
 }
 
 .termblocks-meta-branch {
-    color: #b8f2c0;
+    color: var(--tb-accent);
     font-weight: 500;
 }
 
 .termblocks-meta-diff {
-    color: rgba(255, 255, 255, 0.55);
+    color: var(--tb-text-meta-diff);
 }
 
 .termblocks-diff-add {
-    color: #4caf50;
+    color: var(--tb-diff-add);
 }
 
 .termblocks-diff-del {
-    color: #e57373;
+    color: var(--tb-diff-del);
 }
 
 .termblocks-meta-dur {
@@ -125,12 +198,12 @@
 }
 
 .termblocks-meta-exit {
-    color: #e57373;
+    color: var(--tb-error);
     font-weight: 500;
 }
 
 .termblocks-meta-running {
-    color: #40c4ff;
+    color: var(--tb-running);
     text-transform: uppercase;
     letter-spacing: 0.6px;
     font-size: 10px;
@@ -140,7 +213,7 @@
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
     font-weight: 600;
-    color: #b8f2c0;
+    color: var(--tb-accent);
     white-space: pre-wrap;
     word-break: break-all;
     line-height: 1.35;
@@ -175,22 +248,23 @@
 }
 
 // Status bar: pill chips shown directly above the input line.
+// Unified container wrapping the status chips + input (no internal dividers)
+.termblocks-input-card {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--tb-bar-border);
+    background: var(--tb-bar-bg);
+}
+
 .termblocks-statusbar {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 6px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(0, 0, 0, 0.22);
+    padding: 8px 12px 6px;
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 11px;
     overflow-x: auto;
     white-space: nowrap;
-    // Always reserve the row so chips can appear/disappear without the
-    // whole content area reflowing; the old `&:empty { display: none }`
-    // rule caused a full-page flicker on new tabs whenever git info or
-    // cwd arrived.
     min-height: 26px;
 }
 
@@ -220,33 +294,21 @@
 }
 
 .termblocks-chip-add {
-    color: #4caf50;
+    color: var(--tb-diff-add);
     margin-left: 4px;
 }
 
 .termblocks-chip-del {
-    color: #e57373;
+    color: var(--tb-diff-del);
     margin-left: 2px;
 }
 
-// Bottom input
+// Input row — no border-top, no prompt symbol; lives inside the card
 .termblocks-input-row {
     flex: 0 0 auto;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 20px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(0, 0, 0, 0.28);
-}
-
-.termblocks-input-prompt {
-    color: #b8f2c0;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-weight: 700;
-    font-size: 14px;
-    line-height: 1;
-    opacity: 0.85;
+    padding: 4px 12px 10px;
 }
 
 .termblocks-input-wrap {
@@ -267,7 +329,7 @@
     border: none;
     outline: none;
     color: transparent;
-    caret-color: #b8f2c0;
+    caret-color: var(--tb-accent);
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
     line-height: 1.4;
@@ -275,10 +337,6 @@
     position: relative;
     z-index: 1;
 
-    &::placeholder {
-        color: rgba(255, 255, 255, 0.3);
-        opacity: 1;
-    }
     &::selection {
         background: rgba(184, 242, 192, 0.25);
         color: inherit;
@@ -305,59 +363,119 @@
 }
 
 .tok-cmd {
-    color: #b8f2c0;
+    color: var(--tb-tok-cmd);
     font-weight: 600;
 }
 .tok-flag {
-    color: #89ddff;
+    color: var(--tb-tok-flag);
 }
 .tok-string {
-    color: #f5c45c;
+    color: var(--tb-tok-string);
 }
 .tok-var {
-    color: #c792ea;
+    color: var(--tb-tok-var);
 }
 .tok-comment {
-    color: rgba(255, 255, 255, 0.4);
+    color: var(--tb-tok-comment);
     font-style: italic;
 }
 .tok-op {
-    color: #ff8787;
+    color: var(--tb-tok-op);
     font-weight: 600;
 }
 .tok-path {
-    color: #e6e6e6;
+    color: var(--tb-tok-path);
     text-decoration: underline;
     text-decoration-color: rgba(230, 230, 230, 0.2);
     text-underline-offset: 3px;
 }
 .tok-text {
-    color: rgba(230, 230, 230, 0.92);
+    color: var(--tb-tok-text);
 }
 .tok-ghost {
-    color: rgba(255, 255, 255, 0.28);
+    color: var(--tb-tok-ghost);
 }
 
-.termblocks-input-interrupt {
-    flex: 0 0 auto;
-    background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
-    color: #e57373;
+
+// Clickable chip cursor
+.termblocks-chip-clickable {
     cursor: pointer;
-    font-size: 12px;
-    padding: 4px 8px;
-    line-height: 1;
-    opacity: 0.7;
-    display: inline-flex;
+    &:hover {
+        border-color: rgba(255, 255, 255, 0.22);
+        background: rgba(255, 255, 255, 0.06);
+    }
+}
+
+// Chip popover dropdown — uses the same tokens as the termblocks status bar
+.tb-chip-dropdown {
+    min-width: 160px;
+    max-height: 200px;
+    background: rgba(0, 0, 0, 0.88);
+    border: 1px solid var(--tb-bar-border);
+    border-radius: 6px;
+    backdrop-filter: blur(12px);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    font-size: 11px;
+}
+
+.tb-chip-dropdown-search {
+    display: flex;
     align-items: center;
-    justify-content: center;
-    min-width: 26px;
+    gap: 6px;
+    padding: 6px 9px;
+    border-bottom: 1px solid var(--tb-bar-border);
+    flex: 0 0 auto;
+}
+
+.tb-chip-dropdown-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: rgba(255, 255, 255, 0.8);
+    font-family: inherit;
+    font-size: 11px;
+    &::placeholder { color: rgba(255, 255, 255, 0.25); }
+}
+
+.tb-chip-dropdown-list {
+    overflow-y: auto;
+    flex: 1;
+}
+
+.tb-chip-dropdown-row {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 9px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    user-select: none;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 
     &:hover {
-        opacity: 1;
-        background: rgba(229, 115, 115, 0.12);
+        background: var(--tb-surface-hover);
+        color: rgba(255, 255, 255, 0.9);
     }
+}
+
+.tb-chip-dropdown-row-active {
+    background: rgba(184, 242, 192, 0.12);
+    color: var(--tb-accent);
+    .tb-chip-dropdown-row-icon { color: var(--tb-accent); }
+}
+
+.tb-chip-dropdown-row-icon {
+    font-size: 10px;
+    opacity: 0.6;
+    flex: 0 0 auto;
+    width: 12px;
+    text-align: center;
 }
 
 // Alt-screen takeover

@@ -19,15 +19,13 @@ func TestParserSimpleBel(t *testing.T) {
 	if evs[0].Offset != 0 {
 		t.Errorf("offset want 0, got %d", evs[0].Offset)
 	}
-	if evs[0].SeqLen != len("\x1b]16162;A\x07") {
-		t.Errorf("seqlen want 10, got %d", evs[0].SeqLen)
+	if want := len("\x1b]16162;A\x07"); evs[0].SeqLen != want {
+		t.Errorf("seqlen want %d, got %d", want, evs[0].SeqLen)
 	}
 }
 
 func TestParserWithJSONPayload(t *testing.T) {
 	p := MakeParser()
-	data := `\x1b]16162;D;{"exitcode":42}\x07`
-	_ = data
 	chunk := []byte("\x1b]16162;D;{\"exitcode\":42}\x07")
 	evs := p.Feed(chunk)
 	if len(evs) != 1 {

@@ -61,6 +61,11 @@ func (t *Tracker) OnBytes(ctx context.Context, chunk []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	chunkStart := t.parser.Offset()
+	// Snapshot currentOID before processing events — detectClear uses the
+	// "before" OID so that clearing the screen attributes the clear to the
+	// block that was active when the sequence arrived, not any new prompt row
+	// that an A event in the same chunk may have just created.
+	clearThroughOID := t.currentOID
 	events := t.parser.Feed(chunk)
 	for _, ev := range events {
 		t.handleEvent(ctx, ev)
@@ -70,13 +75,13 @@ func (t *Tracker) OnBytes(ctx context.Context, chunk []byte) {
 	}
 	t.detectAltScreen(chunk)
 	t.detectOsc7(ctx, chunk)
-	t.detectClear(chunk)
+	t.detectClear(chunk, clearThroughOID)
 }
 
 // detectClear watches for CSI 2J or 3J in the PTY stream and emits a
 // cmdblock:clear event so the frontend can hide every block above the
 // current one, matching `clear` behaviour in a traditional terminal.
-func (t *Tracker) detectClear(chunk []byte) {
+func (t *Tracker) detectClear(chunk []byte, throughOID string) {
 	if !bytes.Contains(chunk, clearScreenSeq) && !bytes.Contains(chunk, clearScrollbackSeq) {
 		return
 	}
@@ -85,7 +90,7 @@ func (t *Tracker) detectClear(chunk []byte) {
 		Scopes: []string{"block:" + t.blockID},
 		Data: &cbtypes.CmdBlockClearEvent{
 			BlockID:    t.blockID,
-			ThroughOID: t.currentOID,
+			ThroughOID: throughOID,
 		},
 	})
 }
@@ -137,6 +142,13 @@ func parseOsc7Path(raw string) string {
 		return ""
 	}
 	if u.Path == "" {
+		return ""
+	}
+	// Reject URIs pointing at a non-local host so we don't push a remote path
+	// into this terminal's local cmd:cwd. Allow empty host, "localhost", and
+	// the current machine's hostname variations.
+	host := strings.ToLower(u.Host)
+	if host != "" && host != "localhost" && host != "127.0.0.1" && host != "::1" {
 		return ""
 	}
 	// decoded already by url.Parse
@@ -200,9 +212,9 @@ func (t *Tracker) handleEvent(ctx context.Context, ev Event) {
 		if t.currentOID == "" {
 			return
 		}
-		cmd := decodeCmd64(ev.Payload)
+		cmd, cwd := decodeCmdPayload(ev.Payload)
 		outputStart := ev.Offset + int64(ev.SeqLen)
-		if err := MarkCommandSubmitted(ctx, t.currentOID, cmd, "", ev.Offset, outputStart, ""); err != nil {
+		if err := MarkCommandSubmitted(ctx, t.currentOID, cmd, cwd, ev.Offset, outputStart, ""); err != nil {
 			log.Printf("cmdblock: MarkCommandSubmitted oid=%s: %v", t.currentOID, err)
 			return
 		}
@@ -256,21 +268,31 @@ func (t *Tracker) publishChunk(oid string, offset int64, data []byte) {
 	})
 }
 
-func decodeCmd64(payload string) string {
+// decodeCmdPayload extracts both the base64-encoded command string and any
+// cwd the shell integration reported alongside it. Earlier versions returned
+// only the cmd, silently dropping cwd.
+func decodeCmdPayload(payload string) (cmd string, cwd string) {
 	if payload == "" {
-		return ""
+		return "", ""
 	}
 	var data struct {
 		Cmd64 string `json:"cmd64"`
+		Cwd   string `json:"cwd"`
 	}
-	if err := json.Unmarshal([]byte(payload), &data); err != nil || data.Cmd64 == "" {
-		return ""
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		log.Printf("cmdblock: decodeCmdPayload unmarshal: %v", err)
+		return "", ""
 	}
-	decoded, err := base64.StdEncoding.DecodeString(data.Cmd64)
-	if err != nil {
-		return ""
+	if data.Cmd64 != "" {
+		decoded, err := base64.StdEncoding.DecodeString(data.Cmd64)
+		if err != nil {
+			log.Printf("cmdblock: decodeCmdPayload base64: %v", err)
+		} else {
+			cmd = string(decoded)
+		}
 	}
-	return string(decoded)
+	cwd = data.Cwd
+	return
 }
 
 func decodeExitCode(payload string) int64 {
@@ -280,7 +302,11 @@ func decodeExitCode(payload string) int64 {
 	var data struct {
 		ExitCode *int64 `json:"exitcode"`
 	}
-	if err := json.Unmarshal([]byte(payload), &data); err != nil || data.ExitCode == nil {
+	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		log.Printf("cmdblock: decodeExitCode unmarshal: %v", err)
+		return -1
+	}
+	if data.ExitCode == nil {
 		return -1
 	}
 	return *data.ExitCode
@@ -294,6 +320,7 @@ func decodeShell(payload string) string {
 		Shell string `json:"shell"`
 	}
 	if err := json.Unmarshal([]byte(payload), &data); err != nil {
+		log.Printf("cmdblock: decodeShell unmarshal: %v", err)
 		return ""
 	}
 	return data.Shell

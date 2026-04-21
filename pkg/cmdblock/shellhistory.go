@@ -5,6 +5,7 @@ package cmdblock
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,6 +57,9 @@ func LoadShellHistory(shell string, limit int) []string {
 		seen[line] = len(out)
 		out = append(out, line)
 	}
+	if err := scanner.Err(); err != nil {
+		log.Printf("cmdblock: shell history scan %q: %v", path, err)
+	}
 	// strip empties left by dedup
 	compact := out[:0]
 	for _, s := range out {
@@ -74,18 +78,27 @@ func resolveHistoryPath(shell string) string {
 	if err != nil || home == "" {
 		return ""
 	}
-	if env := os.Getenv("HISTFILE"); env != "" {
-		return env
-	}
+	// HISTFILE only applies to POSIX shells — fish has its own format and
+	// HISTFILE would produce garbage here.
+	envPath := os.Getenv("HISTFILE")
 	switch shell {
 	case "zsh":
+		if envPath != "" {
+			return envPath
+		}
 		return filepath.Join(home, ".zsh_history")
 	case "bash":
+		if envPath != "" {
+			return envPath
+		}
 		return filepath.Join(home, ".bash_history")
 	case "fish":
 		// fish uses its own db format — skip for now, caller falls back to session history
 		return ""
 	case "":
+		if envPath != "" {
+			return envPath
+		}
 		// best-effort: if .zsh_history exists, use it; otherwise try .bash_history.
 		for _, name := range []string{".zsh_history", ".bash_history"} {
 			p := filepath.Join(home, name)

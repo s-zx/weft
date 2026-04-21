@@ -4,7 +4,10 @@
 package cmdblock
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -31,7 +34,16 @@ func LookupGitInfo(ctx context.Context, cwd string) (*GitInfo, error) {
 		return &GitInfo{}, nil
 	}
 	out, err := runGit(ctx, cwd, 500*time.Millisecond, "rev-parse", "--is-inside-work-tree")
-	if err != nil || strings.TrimSpace(out) != "true" {
+	if err != nil {
+		// Distinguish "not a repo" (git returns non-zero + stderr) from real
+		// errors (ctx timeout, git missing). Only the former is benign.
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return &GitInfo{IsRepo: false}, nil
+		}
+		return nil, err
+	}
+	if strings.TrimSpace(out) != "true" {
 		return &GitInfo{IsRepo: false}, nil
 	}
 	info := &GitInfo{IsRepo: true}
@@ -86,11 +98,20 @@ func runGit(ctx context.Context, cwd string, timeout time.Duration, args ...stri
 	defer cancel()
 	cmd := exec.CommandContext(subCtx, "git", args...)
 	cmd.Dir = cwd
-	out, err := cmd.Output()
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
 	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			// Non-exit failure (ctx timeout, git missing, fork error): log so it
+			// isn't silently treated as "not a repo" by upstream callers.
+			log.Printf("cmdblock: git %v in %q failed: %v (stderr: %s)", args, cwd, err, strings.TrimSpace(stderr.String()))
+		}
 		return "", err
 	}
-	return string(out), nil
+	return stdout.String(), nil
 }
 
 func sumNumstat(text string) (adds, dels int) {

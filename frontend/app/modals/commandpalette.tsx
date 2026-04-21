@@ -282,6 +282,7 @@ const CommandPaletteModal = () => {
         }
         const rn = ++reqNumRef.current;
         setIsSearching(true);
+        let cancelled = false;
         const timer = setTimeout(async () => {
             try {
                 const result = await RpcApi.FetchSuggestionsCommand(TabRpcClient, {
@@ -291,17 +292,17 @@ const CommandPaletteModal = () => {
                     reqnum: rn,
                     "file:cwd": cwd ?? getCachedHome(),
                 });
-                if (rn === reqNumRef.current) {
-                    setFileResults(result?.suggestions ?? []);
-                    setSelectedIdx(0);
-                }
+                if (cancelled || rn !== reqNumRef.current) return;
+                setFileResults(result?.suggestions ?? []);
+                setSelectedIdx(0);
             } catch {
-                if (rn === reqNumRef.current) setFileResults([]);
+                if (!cancelled && rn === reqNumRef.current) setFileResults([]);
             } finally {
-                if (rn === reqNumRef.current) setIsSearching(false);
+                if (!cancelled && rn === reqNumRef.current) setIsSearching(false);
             }
         }, 80);
         return () => {
+            cancelled = true;
             clearTimeout(timer);
         };
     }, [fileQuery, cwd, isCommandMode]);
@@ -321,8 +322,10 @@ const CommandPaletteModal = () => {
     const close = useCallback(() => modalsModel.popModal(), []);
 
     const executeCommand = useCallback((cmd: PaletteCommand) => {
+        // pop first so the modal cleanup runs synchronously before the action
+        // (avoids focus-trap conflicts when an action opens another modal)
         modalsModel.popModal();
-        setTimeout(() => cmd.action(), 10);
+        cmd.action();
     }, []);
 
     const openFile = useCallback((suggestion: SuggestionType) => {
@@ -481,7 +484,7 @@ const CommandPaletteModal = () => {
                 </div>
             </div>
         </div>,
-        document.getElementById("main")!
+        document.getElementById("main") ?? document.body
     );
 };
 

@@ -60,12 +60,13 @@ export class NotificationsModel {
                 const block = globalStore.get(blockAtom);
                 const cwd = block?.meta?.["cmd:cwd"] as string | undefined;
 
+                const now = Date.now();
                 const note: AppNotification = {
-                    id: `${data.blockid}:${Date.now()}`,
+                    id: `${data.blockid}:${now}:${Math.random().toString(36).slice(2, 8)}`,
                     blockId: data.blockid,
                     blockCwd: cwd,
                     exitCode: data.cmdexitcode,
-                    ts: Date.now(),
+                    ts: now,
                     read: false,
                 };
 
@@ -97,7 +98,7 @@ export class NotificationsModel {
     focusBlock(blockId: string): void {
         const layoutModel = getLayoutModelForStaticTab();
         const node = layoutModel?.getNodeByBlockId(blockId);
-        if (node?.id) {
+        if (node?.id && layoutModel) {
             layoutModel.focusNode(node.id);
             refocusNode(blockId);
         }

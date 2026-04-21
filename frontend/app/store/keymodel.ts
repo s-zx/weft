@@ -537,7 +537,7 @@ function registerGlobalKeys() {
         createTab();
         return true;
     });
-    globalKeyMap.set("Cmd:k", () => {
+    globalKeyMap.set("Cmd:Shift:p", () => {
         if (modalsModel.isModalOpen("CommandPaletteModal")) {
             modalsModel.popModal();
         } else {

@@ -555,12 +555,13 @@ func (bc *ShellController) manageRunningShellProcess(shellProc *shellexec.ShellP
 		for {
 			nr, err := shellProc.Cmd.Read(buf)
 			if nr > 0 {
-				err := HandleAppendBlockFile(bc.BlockId, wavebase.BlockFile_Term, buf[:nr])
-				if err != nil {
-					log.Printf("error appending to blockfile: %v\n", err)
-				} else {
-					tracker.OnBytes(context.Background(), buf[:nr])
+				appendErr := HandleAppendBlockFile(bc.BlockId, wavebase.BlockFile_Term, buf[:nr])
+				if appendErr != nil {
+					log.Printf("error appending to blockfile: %v\n", appendErr)
 				}
+				// Always feed bytes to tracker regardless of append error so that
+				// tracker stream offsets stay in sync with the raw PTY stream.
+				tracker.OnBytes(context.Background(), buf[:nr])
 			}
 			if err == io.EOF {
 				break

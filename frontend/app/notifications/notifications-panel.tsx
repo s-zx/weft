@@ -1,10 +1,13 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
+import { getApi } from "@/store/global";
 import { cn, fireAndForget } from "@/util/util";
 import { useAtomValue } from "jotai";
 import { memo, useEffect } from "react";
 import { AppNotification, NotificationsModel } from "./notifications-model";
+
+const AUTO_MARK_READ_DELAY_MS = 1500;
 
 function timeAgo(ts: number): string {
     const secs = Math.floor((Date.now() - ts) / 1000);
@@ -15,10 +18,16 @@ function timeAgo(ts: number): string {
     return `${hrs}h ago`;
 }
 
+function tildeify(path: string): string {
+    const home = getApi()?.getHomeDir?.();
+    if (home && path.startsWith(home)) return "~" + path.slice(home.length);
+    return path;
+}
+
 const NotificationRow = memo(({ n }: { n: AppNotification }) => {
     const model = NotificationsModel.getInstance();
     const success = n.exitCode === 0;
-    const cwd = n.blockCwd ? n.blockCwd.replace(/^\/Users\/[^/]+/, "~") : null;
+    const cwd = n.blockCwd ? tildeify(n.blockCwd) : null;
 
     return (
         <div
@@ -56,16 +65,17 @@ export const NotificationsPanel = memo(() => {
     const unread = useAtomValue(model.unreadCountAtom);
 
     useEffect(() => {
-        // Start listening for block events the first time user opens this panel.
         model.ensureSubscribed();
-        if (unread > 0) {
-            const t = setTimeout(() => model.markAllRead(), 1500);
-            return () => clearTimeout(t);
-        }
     }, []);
 
+    useEffect(() => {
+        if (unread <= 0) return;
+        const t = setTimeout(() => model.markAllRead(), AUTO_MARK_READ_DELAY_MS);
+        return () => clearTimeout(t);
+    }, [unread]);
+
     return (
-        <div className="flex flex-col w-[320px] max-h-[440px] bg-[#1e1e2e] border border-white/10 rounded-lg shadow-2xl overflow-hidden">
+        <div className="flex flex-col w-[320px] max-h-[440px] bg-panel border border-white/10 rounded-lg shadow-2xl overflow-hidden">
             <div className="flex items-center justify-between px-3 py-2 border-b border-white/8 shrink-0">
                 <span className="text-[13px] font-semibold text-primary">
                     Notifications{unread > 0 ? ` (${unread})` : ""}

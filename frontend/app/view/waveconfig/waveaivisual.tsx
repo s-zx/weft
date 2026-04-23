@@ -80,7 +80,12 @@ export const WaveAIVisualContent = memo(({ model }: WaveAIVisualContentProps) =>
     const [apiKeyShown, setApiKeyShown] = useState(false);
     const [apiKeyLoaded, setApiKeyLoaded] = useState(false);
     const [modelName, setModelName] = useState(() => settings?.["ai:model"] ?? "");
-    const [baseUrl, setBaseUrl] = useState(() => settings?.["ai:baseurl"] ?? "");
+    const [baseUrl, setBaseUrl] = useState(() => {
+        const saved = settings?.["ai:baseurl"] ?? "";
+        if (saved) return saved;
+        const detected = detectProvider(settings);
+        return ProviderDefs[detected]?.endpoint ?? "";
+    });
     const [maxTokens, setMaxTokens] = useState(() => String(settings?.["ai:maxtokens"] ?? ""));
     const [showAdvanced, setShowAdvanced] = useState(false);
     const [saving, setSaving] = useState(false);
@@ -140,10 +145,11 @@ export const WaveAIVisualContent = memo(({ model }: WaveAIVisualContentProps) =>
                 await RpcApi.SetSecretsCommand(TabRpcClient, { [secretName]: apiKey });
             }
 
+            const effectiveBaseUrl = baseUrl || def.endpoint || null;
             const configUpdate: Record<string, any> = {
                 "ai:apitype": def.apitype,
                 "ai:model": modelName || null,
-                "ai:baseurl": baseUrl || null,
+                "ai:baseurl": effectiveBaseUrl,
             };
 
             if (secretName) {

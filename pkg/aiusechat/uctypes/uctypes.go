@@ -510,6 +510,7 @@ type WaveChatOpts struct {
 	AllowNativeWebSearch bool
 	BuilderId            string
 	BuilderAppId         string
+	Source               string
 
 	// ephemeral to the step
 	TabState       string
@@ -535,11 +536,13 @@ func (opts *WaveChatOpts) GetToolDefinition(toolName string) *ToolDefinition {
 }
 
 func (opts *WaveChatOpts) GetWaveRequestType() string {
+	if opts.Source != "" {
+		return opts.Source
+	}
 	if opts.BuilderId != "" {
 		return "waveapps-builder"
-	} else {
-		return "waveai"
 	}
+	return "waveai"
 }
 
 type ProxyErrorResponse struct {

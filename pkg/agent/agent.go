@@ -19,6 +19,7 @@ import (
 )
 
 const AgentChatStorePrefix = "agent:"
+const AgentSourceName = "crest-agent"
 
 // AgentOpts bundles everything RunAgent needs for a single turn.
 type AgentOpts struct {
@@ -44,7 +45,8 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 		Tools:                ToolsForMode(opts.Session),
 		SystemPrompt:         systemPrompt,
 		TabId:                opts.Session.TabID,
-		AllowNativeWebSearch: false, // agent tools don't include web search in MVP
+		AllowNativeWebSearch: false,
+		Source:               AgentSourceName,
 	}
 
 	return aiusechat.WaveAIPostMessageWrap(ctx, sseHandler, opts.UserMsg, chatOpts)

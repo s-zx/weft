@@ -35,11 +35,12 @@ Branch: `feat/native-agent` | First commit: `070ea0a0`
 - [x] `go vet ./...` clean (full workspace)
 - [x] Committed: `070ea0a0`
 
-### Week 4 remaining: Polish ⬜
+### Week 4 remaining: Polish
 
 - [ ] Telemetry wiring — reuse `recordChatEvent` for agent tool calls
-- [ ] `chatstore.go` — namespaced wrapper (`"agent:"+chatId`) to isolate agent conversations
-- [ ] Unit tests: `modes_test.go`, `http_test.go`, `cmd_history_test.go`, `shell_exec_test.go`
+- [x] Chatstore isolation — `AgentChatStorePrefix = "agent:"` in `agent.go` (commit `abcdf177`)
+- [x] Unit tests: `modes_test.go` (8 tests), `context_test.go` (3 tests) — all pass (commit `abcdf177`)
+- [ ] Unit tests: `http_test.go`, `cmd_history_test.go`, `shell_exec_test.go`
 - [ ] Manual E2E smoke test (requires running Crest):
   - [ ] `:ask how is logging wired` → markdown, no writes, no approval
   - [ ] `:plan add retry to RunAIChat` → writes plan file, opens preview block

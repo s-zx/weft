@@ -1263,6 +1263,11 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
     };
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "Escape" && globalStore.get(model.termAgentVisible)) {
+            e.preventDefault();
+            model.hideTermAgentOverlay();
+            return;
+        }
         if (e.key === ":" && value === "" && !e.ctrlKey && !e.metaKey && !e.altKey) {
             e.preventDefault();
             model.openTermAgentComposer();

@@ -1,17 +1,20 @@
 // Copyright 2026, s-zx
 // SPDX-License-Identifier: Apache-2.0
 
+import { UseChatSendMessageType, UseChatSetMessagesType } from "@/app/aipanel/aitypes";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { getApi, getBlockMetaKeyAtom, getSettingsKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { TermAgentOverlay } from "@/app/view/term/term-agent";
 import { buildTermSettingsMenuItems } from "@/app/view/term/term-settings-menu";
 import { computeTheme } from "@/app/view/term/termutil";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
 import { FolderIcon } from "@/app/fileexplorer/file-icons";
 import { atoms } from "@/store/global";
+import { getWebServerEndpoint } from "@/util/endpoints";
 import { base64ToArray, cn, stringToBase64 } from "@/util/util";
 import { formatRemoteUri } from "@/util/waveutil";
 import { FitAddon } from "@xterm/addon-fit";
@@ -68,6 +71,20 @@ export class TermBlocksViewModel implements ViewModel {
     unsubs: (() => void)[] = [];
     inputRef: React.RefObject<HTMLInputElement | null> = React.createRef();
 
+    termAgentVisible = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
+    termAgentComposerOpen = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
+    termAgentInput = jotai.atom("") as jotai.PrimitiveAtom<string>;
+    termAgentError = jotai.atom(null) as jotai.PrimitiveAtom<string | null>;
+    termAgentChatId = jotai.atom(crypto.randomUUID()) as jotai.PrimitiveAtom<string>;
+    termAgentAgentMode!: jotai.Atom<"ask" | "plan" | "do">;
+    termAgentSendMessage: UseChatSendMessageType | null = null;
+    termAgentSetMessages: UseChatSetMessagesType | null = null;
+    termAgentStop: (() => void) | null = null;
+    termAgentChatStatus: string = "ready";
+    termAgentRealMessage: any | null = null;
+    termAgentPendingMode: "ask" | "plan" | "do" = "do";
+    termAgentPendingContext: { cwd?: string; connection?: string; last_command?: string } = {};
+
     constructor({ blockId }: ViewModelInitType) {
         this.viewType = "termblocks";
         this.blockId = blockId;
@@ -120,6 +137,12 @@ export class TermBlocksViewModel implements ViewModel {
         this.hiddenOidsAtom = jotai.atom<Set<string>>(new Set<string>()) as jotai.PrimitiveAtom<Set<string>>;
         this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
         this.selectedOidAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
+        this.termAgentAgentMode = jotai.atom((get): "ask" | "plan" | "do" => {
+            const input = get(this.termAgentInput);
+            if (input.startsWith("ask ") || input === "ask") return "ask";
+            if (input.startsWith("plan ") || input === "plan") return "plan";
+            return "do";
+        });
         // Initial RPC work is deferred because TabRpcClient is a live binding
         // that can still be undefined during module-evaluation / first-render
         // right after an HMR reload. queueMicrotask runs after module eval is
@@ -442,6 +465,122 @@ export class TermBlocksViewModel implements ViewModel {
 
     getSettingsMenuItems(): ContextMenuItem[] {
         return buildTermSettingsMenuItems({ blockId: this.blockId });
+    }
+
+    get tabModel(): { tabId: string } {
+        return { tabId: globalStore.get(atoms.staticTabId) };
+    }
+
+    openTermAgentComposer() {
+        globalStore.set(this.termAgentVisible, true);
+        globalStore.set(this.termAgentComposerOpen, true);
+        globalStore.set(this.termAgentInput, "");
+        globalStore.set(this.termAgentError, null);
+    }
+
+    closeTermAgentComposer() {
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+    }
+
+    hideTermAgentOverlay() {
+        globalStore.set(this.termAgentVisible, false);
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+    }
+
+    setTermAgentError(message: string | null) {
+        globalStore.set(this.termAgentError, message);
+    }
+
+    getTermAgentMode(): string {
+        return "waveai@balanced";
+    }
+
+    parseTermAgentInput(input: string): { mode: "ask" | "plan" | "do"; stripped: string } {
+        for (const prefix of ["ask", "plan", "do"] as const) {
+            if (input === prefix) return { mode: prefix, stripped: "" };
+            if (input.startsWith(prefix + " ")) return { mode: prefix, stripped: input.slice(prefix.length + 1) };
+        }
+        return { mode: "do", stripped: input };
+    }
+
+    buildTermAgentContext(): { cwd?: string; connection?: string; last_command?: string } {
+        const cwd = globalStore.get(this.blockCwdAtom);
+        const blocks = globalStore.get(this.blocksAtom);
+        const lastDone = [...blocks].reverse().find((b) => b.state === "done");
+        return {
+            cwd: cwd || undefined,
+            last_command: lastDone?.cmd ?? undefined,
+        };
+    }
+
+    async submitTermAgentPrompt(): Promise<void> {
+        const userInput = globalStore.get(this.termAgentInput).trim();
+        if (userInput === "") {
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (this.termAgentChatStatus === "streaming" || this.termAgentChatStatus === "submitted") {
+            return;
+        }
+        if (userInput.toLowerCase() === "new") {
+            this.clearTermAgentSession();
+            this.closeTermAgentComposer();
+            return;
+        }
+        const { mode, stripped } = this.parseTermAgentInput(userInput);
+        if (stripped === "") {
+            this.closeTermAgentComposer();
+            return;
+        }
+        globalStore.set(this.termAgentError, null);
+        this.termAgentRealMessage = { role: "user", parts: [{ type: "text", text: stripped }] };
+        this.termAgentPendingMode = mode;
+        this.termAgentPendingContext = this.buildTermAgentContext();
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+        if (this.termAgentSendMessage) {
+            await this.termAgentSendMessage({ parts: [{ type: "text", text: stripped }] });
+        }
+    }
+
+    registerTermAgentChat(
+        sendMessage: UseChatSendMessageType,
+        setMessages: UseChatSetMessagesType,
+        status: string,
+        stop: () => void
+    ) {
+        this.termAgentSendMessage = sendMessage;
+        this.termAgentSetMessages = setMessages;
+        this.termAgentChatStatus = status;
+        this.termAgentStop = stop;
+    }
+
+    getAndClearTermAgentMessage(): any {
+        const msg = this.termAgentRealMessage;
+        this.termAgentRealMessage = null;
+        return msg;
+    }
+
+    getAndClearTermAgentPendingMode(): string {
+        const mode = this.termAgentPendingMode;
+        this.termAgentPendingMode = "do";
+        return mode;
+    }
+
+    getAndClearTermAgentPendingContext(): any {
+        const ctx = this.termAgentPendingContext;
+        this.termAgentPendingContext = {};
+        return ctx;
+    }
+
+    clearTermAgentSession() {
+        if (this.termAgentSetMessages) {
+            this.termAgentSetMessages([]);
+        }
+        globalStore.set(this.termAgentChatId, crypto.randomUUID());
+        globalStore.set(this.termAgentError, null);
     }
 }
 
@@ -1124,6 +1263,11 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
     };
 
     const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === ":" && value === "" && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            e.preventDefault();
+            model.openTermAgentComposer();
+            return;
+        }
         if (e.ctrlKey && e.key.toLowerCase() === "c" && !e.metaKey && !e.shiftKey && !e.altKey) {
             e.preventDefault();
             setValue("");
@@ -1358,6 +1502,7 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                 <TermBlocksStatusBar cwd={blockMetaCwd} home={home} gitInfo={gitInfo} blockId={model.blockId} />
                 {runningBlock == null && <TermBlocksInput model={model} />}
             </div>
+            <TermAgentOverlay model={model} />
         </div>
     );
 };

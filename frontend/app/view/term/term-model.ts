@@ -650,6 +650,10 @@ export class TermViewModel implements ViewModel {
         const inputEmpty = this.termRef.current?.shellInputEmptyAtom
             ? globalStore.get(this.termRef.current.shellInputEmptyAtom)
             : null;
+        // when shell integration is not available, allow opening anyway
+        if (shellState == null) {
+            return true;
+        }
         return shellState === "ready" && inputEmpty === true;
     }
 
@@ -953,6 +957,7 @@ export class TermViewModel implements ViewModel {
             return true;
         }
 
+        console.log("term-agent keycheck", waveEvent.key, "isChar:", keyutil.isCharacterKeyEvent(waveEvent), "canOpen:", this.canOpenTermAgent());
         if (keyutil.isCharacterKeyEvent(waveEvent) && waveEvent.key === ":" && this.canOpenTermAgent()) {
             this.openTermAgentComposer();
             event.preventDefault();

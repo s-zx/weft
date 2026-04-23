@@ -11,12 +11,35 @@ import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import * as jotai from "jotai";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
-import type { TermViewModel } from "./term-model";
 
 const TermAgentCodeBlockMaxWidth = jotai.atom(720);
 
+export type TermAgentModel = {
+    blockId: string;
+    tabModel: { tabId: string };
+    termAgentVisible: jotai.PrimitiveAtom<boolean>;
+    termAgentComposerOpen: jotai.PrimitiveAtom<boolean>;
+    termAgentInput: jotai.PrimitiveAtom<string>;
+    termAgentError: jotai.PrimitiveAtom<string | null>;
+    termAgentChatId: jotai.PrimitiveAtom<string>;
+    termAgentAgentMode: jotai.Atom<"ask" | "plan" | "do">;
+    getAndClearTermAgentMessage(): any;
+    getTermAgentMode(): string;
+    getAndClearTermAgentPendingMode(): string;
+    getAndClearTermAgentPendingContext(): any;
+    registerTermAgentChat(
+        sendMessage: any,
+        setMessages: any,
+        status: string,
+        stop: () => void
+    ): void;
+    clearTermAgentSession(): void;
+    hideTermAgentOverlay(): void;
+    setTermAgentError(message: string | null): void;
+};
+
 type TermAgentOverlayProps = {
-    model: TermViewModel;
+    model: TermAgentModel;
 };
 
 const TermAgentApprovalButtons = memo(({ toolCallId }: { toolCallId: string }) => {

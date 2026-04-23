@@ -18,6 +18,8 @@ import (
 	"github.com/wavetermdev/waveterm/pkg/web/sse"
 )
 
+const AgentChatStorePrefix = "agent:"
+
 // AgentOpts bundles everything RunAgent needs for a single turn.
 type AgentOpts struct {
 	Session *Session
@@ -36,7 +38,7 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 	}
 
 	chatOpts := uctypes.WaveChatOpts{
-		ChatId:               opts.Session.ChatID,
+		ChatId:               AgentChatStorePrefix + opts.Session.ChatID,
 		ClientId:             clientID,
 		Config:               opts.AIOpts,
 		Tools:                ToolsForMode(opts.Session),

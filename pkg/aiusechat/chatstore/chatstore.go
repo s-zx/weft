@@ -111,6 +111,26 @@ func (cs *ChatStore) PostMessage(chatId string, aiOpts *uctypes.AIOptsType, mess
 	return nil
 }
 
+func (cs *ChatStore) CompactMessages(chatId string, keepFirst, keepLast int) int {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	chat := cs.chats[chatId]
+	if chat == nil {
+		return 0
+	}
+	total := len(chat.NativeMessages)
+	if total <= keepFirst+keepLast {
+		return 0
+	}
+	kept := make([]uctypes.GenAIMessage, 0, keepFirst+keepLast)
+	kept = append(kept, chat.NativeMessages[:keepFirst]...)
+	kept = append(kept, chat.NativeMessages[total-keepLast:]...)
+	removed := total - len(kept)
+	chat.NativeMessages = kept
+	return removed
+}
+
 func (cs *ChatStore) RemoveMessage(chatId string, messageId string) bool {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()

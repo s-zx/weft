@@ -496,6 +496,7 @@ type WaveChatOpts struct {
 	BuilderAppId         string
 	Source               string
 	MaxSteps             int
+	ContextBudget        int
 
 	// ephemeral to the step
 	TabState       string

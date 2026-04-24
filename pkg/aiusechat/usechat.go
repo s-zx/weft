@@ -374,6 +374,7 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 	}
 	firstStep := true
 	stepBudgetWarned := false
+	var lastInputTokens int
 	var cont *uctypes.WaveContinueResponse
 	for {
 		if chatOpts.TabStateGenerator != nil {
@@ -414,6 +415,7 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 		}
 		if len(rtnMessages) > 0 {
 			usage := getUsage(rtnMessages)
+			lastInputTokens = usage.InputTokens
 			log.Printf("usage: input=%d output=%d websearch=%d\n", usage.InputTokens, usage.OutputTokens, usage.NativeWebSearchCount)
 			metrics.Usage.InputTokens += usage.InputTokens
 			metrics.Usage.OutputTokens += usage.OutputTokens
@@ -437,6 +439,13 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 				if err := chatstore.DefaultChatStore.PostMessage(chatOpts.ChatId, &chatOpts.Config, msg); err != nil {
 					log.Printf("Failed to post message: %v", err)
 				}
+			}
+		}
+		if chatOpts.ContextBudget > 0 && lastInputTokens > chatOpts.ContextBudget*4/5 {
+			const compactKeepLast = 10
+			removed := chatstore.DefaultChatStore.CompactMessages(chatOpts.ChatId, 1, compactKeepLast)
+			if removed > 0 {
+				log.Printf("context compaction: removed %d messages (input_tokens=%d, budget=%d)\n", removed, lastInputTokens, chatOpts.ContextBudget)
 			}
 		}
 		firstStep = false

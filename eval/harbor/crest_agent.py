@@ -77,7 +77,7 @@ class CrestAgent(BaseInstalledAgent):
         context: AgentContext,
     ) -> None:
         model = os.environ.get("HARBOR_MODEL", "anthropic/claude-sonnet-4-20250514")
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "") or os.environ.get("OPENROUTER_API_KEY", "")
         api_type = os.environ.get("CREST_API_TYPE", "openai-chat")
         base_url = os.environ.get("CREST_BASE_URL", "")
 

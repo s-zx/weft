@@ -39,6 +39,37 @@ export type WebGetOpts = {
     inner?: boolean;
 };
 
+export async function webClickElement(wc: WebContents, selector: string): Promise<boolean> {
+    if (!wc || !selector) {
+        throw new Error("webContents and selector are required");
+    }
+    const escapedSelector = escapeSelector(selector);
+    const execExpr = `
+    (() => {
+        try {
+            const el = document.querySelector("${escapedSelector}");
+            if (!el) return { error: "element not found: ${escapedSelector}" };
+            el.click();
+            return { value: true };
+        } catch (error) {
+            return { error: error.message };
+        }
+    })()`;
+    const results = await wc.executeJavaScript(execExpr);
+    if (results.error) {
+        throw new Error(results.error);
+    }
+    return results.value;
+}
+
+export async function webScreenshot(wc: WebContents): Promise<string> {
+    if (!wc) {
+        throw new Error("webContents is required");
+    }
+    const image = await wc.capturePage();
+    return image.toPNG().toString("base64");
+}
+
 export async function webGetSelector(wc: WebContents, selector: string, opts?: WebGetOpts): Promise<string[]> {
     if (!wc || !selector) {
         return null;

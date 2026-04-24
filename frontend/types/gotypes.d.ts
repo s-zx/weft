@@ -851,6 +851,21 @@ declare global {
         streammeta: StreamMeta;
     };
 
+    // wshrpc.CommandWebClickData
+    type CommandWebClickData = {
+        workspaceid: string;
+        blockid: string;
+        tabid: string;
+        selector: string;
+    };
+
+    // wshrpc.CommandWebScreenshotData
+    type CommandWebScreenshotData = {
+        workspaceid: string;
+        blockid: string;
+        tabid: string;
+    };
+
     // wshrpc.CommandWebSelectorData
     type CommandWebSelectorData = {
         workspaceid: string;

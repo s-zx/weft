@@ -96,8 +96,8 @@ func TestModeToolNames(t *testing.T) {
 	}
 
 	doMode, _ := LookupMode(ModeDo)
-	if len(doMode.ToolNames) != 9 {
-		t.Fatalf("do mode should have 9 tools, got %d", len(doMode.ToolNames))
+	if len(doMode.ToolNames) != 13 {
+		t.Fatalf("do mode should have 13 tools, got %d", len(doMode.ToolNames))
 	}
 }
 

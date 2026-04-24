@@ -1037,6 +1037,18 @@ func WaveInfoCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (*wshrpc.WaveInfoD
 	return resp, err
 }
 
+// command "webclick", wshserver.WebClickCommand
+func WebClickCommand(w *wshutil.WshRpc, data wshrpc.CommandWebClickData, opts *wshrpc.RpcOpts) (bool, error) {
+	resp, err := sendRpcRequestCallHelper[bool](w, "webclick", data, opts)
+	return resp, err
+}
+
+// command "webscreenshot", wshserver.WebScreenshotCommand
+func WebScreenshotCommand(w *wshutil.WshRpc, data wshrpc.CommandWebScreenshotData, opts *wshrpc.RpcOpts) (string, error) {
+	resp, err := sendRpcRequestCallHelper[string](w, "webscreenshot", data, opts)
+	return resp, err
+}
+
 // command "webselector", wshserver.WebSelectorCommand
 func WebSelectorCommand(w *wshutil.WshRpc, data wshrpc.CommandWebSelectorData, opts *wshrpc.RpcOpts) ([]string, error) {
 	resp, err := sendRpcRequestCallHelper[[]string](w, "webselector", data, opts)

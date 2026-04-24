@@ -138,6 +138,8 @@ type WshRpcInterface interface {
 
 	// emain
 	WebSelectorCommand(ctx context.Context, data CommandWebSelectorData) ([]string, error)
+	WebClickCommand(ctx context.Context, data CommandWebClickData) (bool, error)
+	WebScreenshotCommand(ctx context.Context, data CommandWebScreenshotData) (string, error)
 	NotifyCommand(ctx context.Context, notificationOptions WaveNotificationOptions) error
 	FocusWindowCommand(ctx context.Context, windowId string) error
 	ElectronEncryptCommand(ctx context.Context, data CommandElectronEncryptData) (*CommandElectronEncryptRtnData, error)
@@ -493,6 +495,19 @@ type CommandWebSelectorData struct {
 	TabId       string           `json:"tabid"`
 	Selector    string           `json:"selector"`
 	Opts        *WebSelectorOpts `json:"opts,omitempty"`
+}
+
+type CommandWebClickData struct {
+	WorkspaceId string `json:"workspaceid"`
+	BlockId     string `json:"blockid"`
+	TabId       string `json:"tabid"`
+	Selector    string `json:"selector"`
+}
+
+type CommandWebScreenshotData struct {
+	WorkspaceId string `json:"workspaceid"`
+	BlockId     string `json:"blockid"`
+	TabId       string `json:"tabid"`
 }
 
 type BlockInfoData struct {

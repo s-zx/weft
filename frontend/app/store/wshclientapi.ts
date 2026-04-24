@@ -1044,6 +1044,18 @@ export class RpcApiType {
         return client.wshRpcCall("waveinfo", null, opts);
     }
 
+    // command "webclick" [call]
+    WebClickCommand(client: WshClient, data: CommandWebClickData, opts?: RpcOpts): Promise<boolean> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "webclick", data, opts);
+        return client.wshRpcCall("webclick", data, opts);
+    }
+
+    // command "webscreenshot" [call]
+    WebScreenshotCommand(client: WshClient, data: CommandWebScreenshotData, opts?: RpcOpts): Promise<string> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "webscreenshot", data, opts);
+        return client.wshRpcCall("webscreenshot", data, opts);
+    }
+
     // command "webselector" [call]
     WebSelectorCommand(client: WshClient, data: CommandWebSelectorData, opts?: RpcOpts): Promise<string[]> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "webselector", data, opts);

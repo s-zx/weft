@@ -9,14 +9,7 @@ import (
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
-// BrowserToolNamespace is reserved for Phase 2 browser automation tools.
-// Tool names under this namespace (e.g. "browser.navigate") are registered as
-// stubs in MVP so mode ToolNames entries can reference them without wiring up
-// the implementation yet.
 const BrowserToolNamespace = "browser"
-
-// ApprovalCategoryBrowser groups browser-action approvals so the UI can render
-// them together once the tools are implemented.
 const ApprovalCategoryBrowser = "browser"
 
 // ToolsForMode returns the concrete ToolDefinition list the step loop will see
@@ -62,6 +55,14 @@ func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 		return tools.CreateBlock(sess.TabID, sess.BlockID, sess.Connection, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
 	case "focus_block":
 		return tools.FocusBlock(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+	case "browser.navigate":
+		return tools.BrowserNavigate(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+	case "browser.read_text":
+		return tools.BrowserReadText(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+	case "browser.click":
+		return tools.BrowserClick(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+	case "browser.screenshot":
+		return tools.BrowserScreenshot(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
 	}
 	return uctypes.ToolDefinition{}, false
 }

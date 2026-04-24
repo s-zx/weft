@@ -58,8 +58,18 @@ Branch: `feat/native-agent`
 - [x] Agent auto-discovers 8 skills (add-config, add-rpc, add-wshcmd, context-menu, create-view, electron-api, waveenv, wps-events)
 - [x] 7 unit tests (discovery, frontmatter parsing, context building, edge cases)
 
+### Browser Tools ✅
+- [x] `browser.navigate` — updates `meta.url` on web block, frontend re-renders `<webview>`
+- [x] `browser.read_text` — reads DOM via `WebSelectorCommand` → `executeJavaScript()`
+- [x] `browser.click` — clicks element via new `WebClickCommand` → Electron handler
+- [x] `browser.screenshot` — captures webview viewport via new `WebScreenshotCommand` → `capturePage()`
+- [x] New RPC types: `CommandWebClickData`, `CommandWebScreenshotData`
+- [x] New Electron handlers: `handle_webclick`, `handle_webscreenshot` in `emain-wsh.ts`
+- [x] `webClickElement()`, `webScreenshot()` helpers in `emain-web.ts`
+- [x] All 4 tools wired into `ModeDo`, all require user approval
+- [x] 10 unit tests (input parsing, tool definitions, capabilities)
+
 ### Remaining
-- [ ] Browser tool implementation — CDP via `webContents.debugger`, fill `browser.*` stubs
 - [ ] Eval harness: golden transcript replay + terminal-bench tasks
 
 ## Phase 3 — Stretch ⬜
@@ -82,3 +92,4 @@ Branch: `feat/native-agent`
 - **MCP client** — `pkg/agent/mcp/` manages external MCP server connections. Config via `ai:mcpservers` in `settings.json`. Tools namespaced as `mcp__<server>__<tool>`, always require approval.
 - **Skills** — `pkg/agent/skills.go` scans `.kilocode/skills/` at runtime, injects skill names + descriptions into the system prompt so the agent knows which guides are available.
 - **Module path** — `github.com/s-zx/crest` (renamed from `wavetermdev/waveterm`).
+- **Browser tools** — 4 tools (`browser.navigate/read_text/click/screenshot`) use Electron's webContents via RPC. Navigate updates block meta; read/click/screenshot route through `emain-wsh.ts` Electron handlers to the `<webview>` webContents.

@@ -1268,11 +1268,6 @@ declare global {
         "layout:widgetsvisible"?: boolean;
         "layout:fileexplorervisible"?: boolean;
         "layout:fileexplorerwidth"?: number;
-        "waveai:panelopen"?: boolean;
-        "waveai:panelwidth"?: number;
-        "waveai:model"?: string;
-        "waveai:chatid"?: string;
-        "waveai:widgetcontext"?: boolean;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
@@ -1718,8 +1713,6 @@ declare global {
         "waveai:toolusecount"?: number;
         "waveai:tooluseerrorcount"?: number;
         "waveai:tooldetail"?: {[key: string]: number};
-        "waveai:premiumreq"?: number;
-        "waveai:proxyreq"?: number;
         "waveai:haderror"?: boolean;
         "waveai:imagecount"?: number;
         "waveai:pdfcount"?: number;
@@ -1732,7 +1725,6 @@ declare global {
         "waveai:mode"?: string;
         "waveai:provider"?: string;
         "waveai:islocal"?: boolean;
-        "waveai:feedback"?: "good" | "bad";
         "waveai:action"?: string;
         "job:donereason"?: string;
         "job:kind"?: string;

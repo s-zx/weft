@@ -264,8 +264,16 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 	inputJSON, _ := json.Marshal(toolCall.Input)
 	logutil.DevPrintf("TOOLUSE name=%s id=%s input=%s approval=%q\n", toolCall.Name, toolCall.ID, utilfn.TruncateString(string(inputJSON), 40), toolCall.ToolUseData.Approval)
 
+	approval := ""
+	if toolCall.ToolUseData != nil {
+		approval = toolCall.ToolUseData.Approval
+	}
+	startTs := time.Now()
+
 	toolDef := chatOpts.GetToolDefinition(toolCall.Name)
 	result := processToolCallInternal(backend, toolCall, chatOpts, toolDef, sseHandler)
+
+	durationMs := time.Since(startTs).Milliseconds()
 
 	if result.ErrorText != "" {
 		log.Printf("  error=%s\n", result.ErrorText)
@@ -277,6 +285,22 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 	if toolDef != nil && toolDef.ToolLogName != "" {
 		metrics.ToolDetail[toolDef.ToolLogName]++
 	}
+
+	outcome := "success"
+	if result.ErrorText != "" {
+		outcome = "error"
+	}
+	metrics.AuditLog = append(metrics.AuditLog, uctypes.ToolAuditEvent{
+		Timestamp:  startTs.UnixMilli(),
+		ChatId:     chatOpts.ChatId,
+		ToolName:   toolCall.Name,
+		ToolCallId: toolCall.ID,
+		InputArgs:  utilfn.TruncateString(string(inputJSON), 200),
+		Approval:   approval,
+		DurationMs: durationMs,
+		Outcome:    outcome,
+		ErrorText:  result.ErrorText,
+	})
 
 	if toolCall.ToolUseData != nil {
 		_ = sseHandler.AiMsgData("data-tooluse", toolCall.ID, *toolCall.ToolUseData)

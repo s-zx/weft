@@ -283,6 +283,18 @@ type AIUsage struct {
 	NativeWebSearchCount int    `json:"nativewebsearchcount,omitempty"`
 }
 
+type ToolAuditEvent struct {
+	Timestamp  int64  `json:"ts"`
+	ChatId     string `json:"chatid"`
+	ToolName   string `json:"tool"`
+	ToolCallId string `json:"callid"`
+	InputArgs  string `json:"input"`
+	Approval   string `json:"approval"`
+	DurationMs int64  `json:"durationms"`
+	Outcome    string `json:"outcome"`
+	ErrorText  string `json:"error,omitempty"`
+}
+
 type AIMetrics struct {
 	ChatId            string         `json:"chatid"`
 	StepNum           int            `json:"stepnum"`
@@ -303,6 +315,7 @@ type AIMetrics struct {
 	AIMode            string         `json:"aimode,omitempty"`
 	AIProvider        string         `json:"aiprovider,omitempty"`
 	IsLocal           bool           `json:"islocal,omitempty"`
+	AuditLog          []ToolAuditEvent `json:"auditlog,omitempty"`
 }
 
 type AIFunctionCallInput struct {

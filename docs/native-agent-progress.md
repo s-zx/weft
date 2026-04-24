@@ -95,10 +95,10 @@ Branch: `feat/native-agent`
 Tracking the prioritized roadmap in [`agent-optimization-roadmap.md`](./agent-optimization-roadmap.md).
 
 - [x] LLM retry with exponential backoff — `pkg/aiusechat/httpretry/` wraps `httpClient.Do` for all 4 backends (anthropic, openai responses, gemini, openaichat). Retries 429/5xx and transport errors with equal-jitter backoff, honors `Retry-After`, capped at MaxBackoff. 18 unit tests.
-- [ ] Step budget enforcement
-- [ ] Context compaction at 80% threshold
-- [ ] Dangerous command detection
-- [ ] Structured audit log
+- [x] Step budget enforcement — `MaxSteps` on WaveChatOpts, default 50 for agent. Hard stop at limit, soft system-prompt warning at 80%. 3 tests.
+- [x] Context compaction — `ContextBudget` on WaveChatOpts, default 100k tokens. When last step's `input_tokens` exceeds 80% of budget, drops middle messages from chatstore (keeps first + last 10). `CompactMessages()` on ChatStore. 4 tests.
+- [x] Dangerous command detection — 12 regex patterns in `IsDangerousCommand()` covering rm -rf, force push, hard reset, pipe-to-shell, dd, mkfs, chmod 777, etc. Wired into shell_exec via `ToolVerifyInput` — forces approval even when mode auto-approves. 43 test cases.
+- [x] Structured audit log — `ToolAuditEvent` type on `AIMetrics.AuditLog`. Each tool call emits timestamp, chatId, tool name, callId, truncated input, approval, duration, outcome, error. 1 test.
 
 ## Architecture
 

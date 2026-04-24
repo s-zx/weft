@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wavetermdev/waveterm/tsunami/engine"
-	"github.com/wavetermdev/waveterm/tsunami/util"
-	"github.com/wavetermdev/waveterm/tsunami/vdom"
+	"github.com/s-zx/crest/tsunami/engine"
+	"github.com/s-zx/crest/tsunami/util"
+	"github.com/s-zx/crest/tsunami/vdom"
 )
 
 const TsunamiCloseOnStdinEnvVar = "TSUNAMI_CLOSEONSTDIN"

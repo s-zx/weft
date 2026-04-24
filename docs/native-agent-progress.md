@@ -63,6 +63,7 @@ Branch: `feat/native-agent`
 - [ ] Conversation export/import (`.crest-agent.json`)
 - [ ] Local embedding-based repo search
 - [ ] Multi-block coordinated tasks, plan → execution handoff
+- [ ] Rename Go module path `wavetermdev/waveterm` → `s-zx/crest` (mechanical sed + regenerate, ~200 files)
 
 ## Architecture
 

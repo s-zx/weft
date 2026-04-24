@@ -6,7 +6,7 @@ import (
 	"io"
 	"sync"
 
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc"
 )
 
 type DataSender interface {

@@ -4,8 +4,8 @@
 package tools
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/aiusechat"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 // ReadDir wraps pkg/aiusechat.GetReadDirToolDefinition for the agent.

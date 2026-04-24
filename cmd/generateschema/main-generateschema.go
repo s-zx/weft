@@ -11,9 +11,9 @@ import (
 	"reflect"
 
 	"github.com/invopop/jsonschema"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
 )
 
 const WaveSchemaSettingsFileName = "schema/settings.json"

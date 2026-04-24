@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"encoding/json"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 // OpenAI Chat Completions API types (simplified)

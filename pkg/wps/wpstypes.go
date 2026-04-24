@@ -4,7 +4,7 @@
 package wps
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 // IMPORTANT: When adding a new event constant, you MUST also:

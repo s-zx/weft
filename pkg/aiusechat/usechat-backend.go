@@ -7,12 +7,12 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/anthropic"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/gemini"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/openai"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/openaichat"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/web/sse"
+	"github.com/s-zx/crest/pkg/aiusechat/anthropic"
+	"github.com/s-zx/crest/pkg/aiusechat/gemini"
+	"github.com/s-zx/crest/pkg/aiusechat/openai"
+	"github.com/s-zx/crest/pkg/aiusechat/openaichat"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/web/sse"
 )
 
 // UseChatBackend defines the interface for AI chat backend providers (OpenAI, Anthropic, etc.)

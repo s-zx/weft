@@ -15,16 +15,16 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/wavetermdev/waveterm/pkg/tsunamiutil"
-	"github.com/wavetermdev/waveterm/pkg/utilds"
-	"github.com/wavetermdev/waveterm/pkg/waveappstore"
-	"github.com/wavetermdev/waveterm/pkg/waveapputil"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wps"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
-	"github.com/wavetermdev/waveterm/tsunami/build"
+	"github.com/s-zx/crest/pkg/tsunamiutil"
+	"github.com/s-zx/crest/pkg/utilds"
+	"github.com/s-zx/crest/pkg/waveappstore"
+	"github.com/s-zx/crest/pkg/waveapputil"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wps"
+	"github.com/s-zx/crest/pkg/wstore"
+	"github.com/s-zx/crest/tsunami/build"
 )
 
 type TsunamiAppProc struct {

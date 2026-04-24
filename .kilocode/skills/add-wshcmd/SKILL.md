@@ -35,8 +35,8 @@ import (
     "fmt"
 
     "github.com/spf13/cobra"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+    "github.com/s-zx/crest/pkg/wshrpc"
+    "github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 var myCommandCmd = &cobra.Command{
@@ -308,8 +308,8 @@ Use the `wshclient` package to make RPC calls:
 
 ```go
 import (
-    "github.com/wavetermdev/waveterm/pkg/wshrpc"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+    "github.com/s-zx/crest/pkg/wshrpc"
+    "github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 // Simple RPC call
@@ -429,7 +429,7 @@ package cmd
 
 import (
     "github.com/spf13/cobra"
-    "github.com/wavetermdev/waveterm/pkg/wavebase"
+    "github.com/s-zx/crest/pkg/wavebase"
 )
 
 var versionCmd = &cobra.Command{
@@ -487,8 +487,8 @@ import (
     "fmt"
 
     "github.com/spf13/cobra"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+    "github.com/s-zx/crest/pkg/wshrpc"
+    "github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 var setTitleCmd = &cobra.Command{
@@ -589,8 +589,8 @@ import (
     "fmt"
 
     "github.com/spf13/cobra"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc"
-    "github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+    "github.com/s-zx/crest/pkg/wshrpc"
+    "github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 var myGroupCmd = &cobra.Command{

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wavetermdev/waveterm/pkg/util/shellutil"
-	"github.com/wavetermdev/waveterm/pkg/util/syncbuf"
+	"github.com/s-zx/crest/pkg/util/shellutil"
+	"github.com/s-zx/crest/pkg/util/syncbuf"
 )
 
 type connContextKeyType struct{}

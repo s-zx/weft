@@ -11,9 +11,9 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/tsunami/build"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/tsunami/build"
 )
 
 const DefaultTsunamiSdkVersion = "v0.12.4"

@@ -4,9 +4,9 @@
 package agent
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/agent/mcp"
-	"github.com/wavetermdev/waveterm/pkg/agent/tools"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/agent/mcp"
+	"github.com/s-zx/crest/pkg/agent/tools"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 // BrowserToolNamespace is reserved for Phase 2 browser automation tools.

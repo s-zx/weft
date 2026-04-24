@@ -11,10 +11,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/service"
-	"github.com/wavetermdev/waveterm/pkg/tsgen"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/service"
+	"github.com/s-zx/crest/pkg/tsgen"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wshrpc"
 )
 
 func generateTypesFile(tsTypesMap map[reflect.Type]string) error {

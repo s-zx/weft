@@ -10,7 +10,7 @@ import (
 	"strings"
 
 	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 const ToolPrefix = "mcp__"

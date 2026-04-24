@@ -12,9 +12,9 @@ import (
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	mcplib "github.com/mark3labs/mcp-go/mcp"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wconfig"
 )
 
 const ConnectTimeout = 30 * time.Second

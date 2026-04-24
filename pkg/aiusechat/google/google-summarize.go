@@ -11,7 +11,7 @@ import (
 	"strings"
 
 	"github.com/google/generative-ai-go/genai"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 	"google.golang.org/api/option"
 )
 

@@ -8,7 +8,7 @@ import (
 	"slices"
 	"sync"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 type ChatStore struct {

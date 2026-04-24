@@ -6,7 +6,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 func TestLookupMode_ValidModes(t *testing.T) {

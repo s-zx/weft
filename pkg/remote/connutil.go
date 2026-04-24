@@ -17,12 +17,12 @@ import (
 	"text/template"
 	"time"
 
-	"github.com/wavetermdev/waveterm/pkg/blocklogger"
-	"github.com/wavetermdev/waveterm/pkg/genconn"
-	"github.com/wavetermdev/waveterm/pkg/util/iterfn"
-	"github.com/wavetermdev/waveterm/pkg/util/shellutil"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/blocklogger"
+	"github.com/s-zx/crest/pkg/genconn"
+	"github.com/s-zx/crest/pkg/util/iterfn"
+	"github.com/s-zx/crest/pkg/util/shellutil"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wconfig"
 	"golang.org/x/crypto/ssh"
 )
 

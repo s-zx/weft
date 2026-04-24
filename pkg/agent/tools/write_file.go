@@ -4,8 +4,8 @@
 package tools
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/aiusechat"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 func WriteTextFile(approval func(any) string) uctypes.ToolDefinition {

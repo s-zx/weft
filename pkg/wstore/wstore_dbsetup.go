@@ -12,11 +12,11 @@ import (
 
 	"github.com/jmoiron/sqlx"
 	"github.com/sawka/txwrap"
-	"github.com/wavetermdev/waveterm/pkg/util/migrateutil"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/util/migrateutil"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/waveobj"
 
-	dbfs "github.com/wavetermdev/waveterm/db"
+	dbfs "github.com/s-zx/crest/db"
 )
 
 const WStoreDBName = "waveterm.db"

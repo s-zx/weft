@@ -3,7 +3,7 @@
 
 package agent
 
-import "github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+import "github.com/s-zx/crest/pkg/aiusechat/uctypes"
 
 const (
 	ModeAsk  = "ask"

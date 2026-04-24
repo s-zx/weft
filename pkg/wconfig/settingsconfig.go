@@ -36,27 +36,6 @@ const AnySchema = `
 }
 `
 
-// old AI Widget presets (deprecated)
-type AiSettingsType struct {
-	AiClear              bool    `json:"ai:*,omitempty"`
-	AiPreset             string  `json:"ai:preset,omitempty"`
-	AiApiType            string  `json:"ai:apitype,omitempty"`
-	AiBaseURL            string  `json:"ai:baseurl,omitempty"`
-	AiApiToken           string  `json:"ai:apitoken,omitempty"`
-	AiApiTokenSecretName string  `json:"ai:apitokensecretname,omitempty"`
-	AiName               string  `json:"ai:name,omitempty"`
-	AiModel         string  `json:"ai:model,omitempty"`
-	AiOrgID         string  `json:"ai:orgid,omitempty"`
-	AIApiVersion    string  `json:"ai:apiversion,omitempty"`
-	AiMaxTokens     float64 `json:"ai:maxtokens,omitempty"`
-	AiTimeoutMs     float64 `json:"ai:timeoutms,omitempty"`
-	AiProxyUrl      string  `json:"ai:proxyurl,omitempty"`
-	AiFontSize      float64 `json:"ai:fontsize,omitempty"`
-	AiFixedFontSize float64 `json:"ai:fixedfontsize,omitempty"`
-	DisplayName     string  `json:"display:name,omitempty"`
-	DisplayOrder    float64 `json:"display:order,omitempty"`
-}
-
 type SettingsType struct {
 	AppClear                      bool   `json:"app:*,omitempty"`
 	AppGlobalHotkey               string `json:"app:globalhotkey,omitempty"`
@@ -73,24 +52,13 @@ type SettingsType struct {
 
 	FeatureWaveAppBuilder bool `json:"feature:waveappbuilder,omitempty"`
 
-	AiClear              bool    `json:"ai:*,omitempty"`
-	AiPreset             string  `json:"ai:preset,omitempty"`
 	AiApiType            string  `json:"ai:apitype,omitempty"`
 	AiBaseURL            string  `json:"ai:baseurl,omitempty"`
 	AiApiToken           string  `json:"ai:apitoken,omitempty"`
 	AiApiTokenSecretName string  `json:"ai:apitokensecretname,omitempty"`
-	AiName               string  `json:"ai:name,omitempty"`
 	AiModel              string  `json:"ai:model,omitempty"`
-	AiOrgID              string  `json:"ai:orgid,omitempty"`
-	AIApiVersion         string  `json:"ai:apiversion,omitempty"`
 	AiMaxTokens          float64 `json:"ai:maxtokens,omitempty"`
 	AiTimeoutMs          float64 `json:"ai:timeoutms,omitempty"`
-	AiProxyUrl           string  `json:"ai:proxyurl,omitempty"`
-	AiFontSize           float64 `json:"ai:fontsize,omitempty"`
-	AiFixedFontSize      float64 `json:"ai:fixedfontsize,omitempty"`
-
-	WaveAiShowCloudModes bool   `json:"waveai:showcloudmodes,omitempty"`
-	WaveAiDefaultMode    string `json:"waveai:defaultmode,omitempty"`
 
 	TermClear               bool     `json:"term:*,omitempty"`
 	TermFontSize            float64  `json:"term:fontsize,omitempty"`
@@ -186,95 +154,6 @@ type SettingsType struct {
 	TsunamiGoPath         string `json:"tsunami:gopath,omitempty"`
 
 	GithubToken string `json:"github:token,omitempty"`
-}
-
-func (s *SettingsType) GetAiSettings() *AiSettingsType {
-	return &AiSettingsType{
-		AiClear:         s.AiClear,
-		AiPreset:        s.AiPreset,
-		AiApiType:       s.AiApiType,
-		AiBaseURL:       s.AiBaseURL,
-		AiApiToken:           s.AiApiToken,
-		AiApiTokenSecretName: s.AiApiTokenSecretName,
-		AiName:               s.AiName,
-		AiModel:         s.AiModel,
-		AiOrgID:         s.AiOrgID,
-		AIApiVersion:    s.AIApiVersion,
-		AiMaxTokens:     s.AiMaxTokens,
-		AiTimeoutMs:     s.AiTimeoutMs,
-		AiProxyUrl:      s.AiProxyUrl,
-		AiFontSize:      s.AiFontSize,
-		AiFixedFontSize: s.AiFixedFontSize,
-	}
-}
-
-func MergeAiSettings(settings ...*AiSettingsType) *AiSettingsType {
-	result := &AiSettingsType{}
-
-	for _, s := range settings {
-		if s == nil {
-			continue
-		}
-
-		// If this setting has AiClear=true, replace result with this entire setting
-		if s.AiClear {
-			result = s
-			result.AiClear = false
-			continue
-		}
-
-		// Merge non-empty values
-		if s.AiPreset != "" {
-			result.AiPreset = s.AiPreset
-		}
-		if s.AiApiType != "" {
-			result.AiApiType = s.AiApiType
-		}
-		if s.AiBaseURL != "" {
-			result.AiBaseURL = s.AiBaseURL
-		}
-		if s.AiApiToken != "" {
-			result.AiApiToken = s.AiApiToken
-		}
-		if s.AiApiTokenSecretName != "" {
-			result.AiApiTokenSecretName = s.AiApiTokenSecretName
-		}
-		if s.AiName != "" {
-			result.AiName = s.AiName
-		}
-		if s.AiModel != "" {
-			result.AiModel = s.AiModel
-		}
-		if s.AiOrgID != "" {
-			result.AiOrgID = s.AiOrgID
-		}
-		if s.AIApiVersion != "" {
-			result.AIApiVersion = s.AIApiVersion
-		}
-		if s.AiProxyUrl != "" {
-			result.AiProxyUrl = s.AiProxyUrl
-		}
-		if s.AiMaxTokens != 0 {
-			result.AiMaxTokens = s.AiMaxTokens
-		}
-		if s.AiTimeoutMs != 0 {
-			result.AiTimeoutMs = s.AiTimeoutMs
-		}
-		if s.AiFontSize != 0 {
-			result.AiFontSize = s.AiFontSize
-		}
-		if s.AiFixedFontSize != 0 {
-			result.AiFixedFontSize = s.AiFixedFontSize
-		}
-		if s.DisplayName != "" {
-			result.DisplayName = s.DisplayName
-		}
-		if s.DisplayOrder != 0 {
-			result.DisplayOrder = s.DisplayOrder
-		}
-	}
-
-	return result
 }
 
 type ConfigError struct {
@@ -956,18 +835,6 @@ func (fc *FullConfigType) CountCustomWidgets() int {
 	count := 0
 	for widgetID := range fc.Widgets {
 		if !strings.HasPrefix(widgetID, "defwidget@") {
-			count++
-		}
-	}
-	return count
-}
-
-// CountCustomAIPresets returns the number of custom AI presets the user has defined.
-// Custom AI presets are identified as presets that start with "ai@" but aren't "ai@global" or "ai@wave".
-func (fc *FullConfigType) CountCustomAIPresets() int {
-	count := 0
-	for presetID := range fc.Presets {
-		if strings.HasPrefix(presetID, "ai@") && presetID != "ai@global" && presetID != "ai@wave" {
 			count++
 		}
 	}

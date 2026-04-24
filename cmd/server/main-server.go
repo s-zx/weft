@@ -231,15 +231,13 @@ func updateTelemetryCounts(lastCounts telemetrydata.TEventProps) telemetrydata.T
 
 	fullConfig := wconfig.GetWatcher().GetFullConfig()
 	customWidgets := fullConfig.CountCustomWidgets()
-	customAIPresets := fullConfig.CountCustomAIPresets()
 	customSettings := wconfig.CountCustomSettings()
 	customAIModes := fullConfig.CountCustomAIModes()
 
 	props.UserSet = &telemetrydata.TEventUserProps{
-		SettingsCustomWidgets:   customWidgets,
-		SettingsCustomAIPresets: customAIPresets,
-		SettingsCustomSettings:  customSettings,
-		SettingsCustomAIModes:   customAIModes,
+		SettingsCustomWidgets:  customWidgets,
+		SettingsCustomSettings: customSettings,
+		SettingsCustomAIModes:  customAIModes,
 	}
 
 	secretsCount, err := secretstore.CountSecrets()

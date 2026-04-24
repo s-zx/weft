@@ -1,7 +1,6 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import aipresetsSchema from "../../../schema/aipresets.json";
 import backgroundsSchema from "../../../schema/backgrounds.json";
 import connectionsSchema from "../../../schema/connections.json";
 import settingsSchema from "../../../schema/settings.json";
@@ -24,11 +23,6 @@ const MonacoSchemas: SchemaInfo[] = [
         uri: "wave://schema/connections.json",
         fileMatch: ["*/WAVECONFIGPATH/connections.json"],
         schema: connectionsSchema,
-    },
-    {
-        uri: "wave://schema/aipresets.json",
-        fileMatch: ["*/WAVECONFIGPATH/presets/ai.json"],
-        schema: aipresetsSchema,
     },
     {
         uri: "wave://schema/backgrounds.json",

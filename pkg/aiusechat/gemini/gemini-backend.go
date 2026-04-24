@@ -19,6 +19,7 @@ import (
 	"github.com/launchdarkly/eventsource"
 	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
 	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/util/utilfn"
 	"github.com/s-zx/crest/pkg/wavebase"
@@ -236,7 +237,7 @@ func RunGeminiChatStep(
 		return nil, nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpretry.Do(ctx, httpClient, req, httpretry.DefaultConfig(), "gemini")
 	if err != nil {
 		return nil, nil, fmt.Errorf("HTTP request failed: %w", err)
 	}

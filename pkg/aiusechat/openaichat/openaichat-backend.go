@@ -18,6 +18,7 @@ import (
 	"github.com/launchdarkly/eventsource"
 	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
 	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/web/sse"
 )
@@ -65,7 +66,7 @@ func RunChatStep(
 	if err != nil {
 		return nil, nil, err
 	}
-	resp, err := client.Do(req)
+	resp, err := httpretry.Do(ctx, client, req, httpretry.DefaultConfig(), "openaichat")
 	if err != nil {
 		return nil, nil, fmt.Errorf("request failed: %w", err)
 	}

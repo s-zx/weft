@@ -90,6 +90,16 @@ Branch: `feat/native-agent`
 - [ ] Multi-block coordinated tasks, plan → execution handoff
 - [x] ~~Rename Go module path `wavetermdev/waveterm` → `s-zx/crest`~~ (done — 265 files, mechanical sed + regenerate)
 
+## Optimization (Tier 1 — production hardening)
+
+Tracking the prioritized roadmap in [`agent-optimization-roadmap.md`](./agent-optimization-roadmap.md).
+
+- [x] LLM retry with exponential backoff — `pkg/aiusechat/httpretry/` wraps `httpClient.Do` for all 4 backends (anthropic, openai responses, gemini, openaichat). Retries 429/5xx and transport errors with equal-jitter backoff, honors `Retry-After`, capped at MaxBackoff. 18 unit tests.
+- [ ] Step budget enforcement
+- [ ] Context compaction at 80% threshold
+- [ ] Dangerous command detection
+- [ ] Structured audit log
+
 ## Architecture
 
 - **`pkg/agent` = policy, `pkg/aiusechat` = mechanism.** One-way dependency.
@@ -104,3 +114,4 @@ Branch: `feat/native-agent`
 - **Module path** — `github.com/s-zx/crest` (renamed from `wavetermdev/waveterm`).
 - **Browser tools** — 4 tools (`browser.navigate/read_text/click/screenshot`) use Electron's webContents via RPC. Navigate updates block meta; read/click/screenshot route through `emain-wsh.ts` Electron handlers to the `<webview>` webContents.
 - **Eval harness** — `pkg/agent/eval/` provides golden transcript replay (mock LLM, real tools, JSON test cases). `eval/harbor/` provides a terminal-bench 2.0 adapter for running Crest on the Harbor benchmark framework.
+- **HTTP retry** — `pkg/aiusechat/httpretry/` is the shared retry wrapper used by every backend before the SSE stream starts. Retry happens at the HTTP layer only; once headers come back with a non-retryable status (typically 200 + `text/event-stream`), the caller owns the stream and any mid-stream error is surfaced to the user without retry (re-emitting partial deltas would corrupt the UI).

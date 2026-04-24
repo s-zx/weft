@@ -28,14 +28,14 @@ func RunChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []*StoredChatMessage, *uctypes.RateLimitInfo, error) {
+) (*uctypes.WaveStopReason, []*StoredChatMessage, error) {
 	if sseHandler == nil {
-		return nil, nil, nil, errors.New("sse handler is nil")
+		return nil, nil, errors.New("sse handler is nil")
 	}
 
 	chat := chatstore.DefaultChatStore.Get(chatOpts.ChatId)
 	if chat == nil {
-		return nil, nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
+		return nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
 	}
 
 	if chatOpts.Config.TimeoutMs > 0 {
@@ -51,45 +51,45 @@ func RunChatStep(
 	for _, genMsg := range chat.NativeMessages {
 		chatMsg, ok := genMsg.(*StoredChatMessage)
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("expected StoredChatMessage, got %T", genMsg)
+			return nil, nil, fmt.Errorf("expected StoredChatMessage, got %T", genMsg)
 		}
 		messages = append(messages, *chatMsg.Message.clean())
 	}
 
 	req, err := buildChatHTTPRequest(ctx, messages, chatOpts)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	client, err := aiutil.MakeHTTPClient(chatOpts.Config.ProxyURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("request failed: %w", err)
+		return nil, nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
-		return nil, nil, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
+		return nil, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	// Setup SSE if this is a new request (not a continuation)
 	if cont == nil {
 		if err := sseHandler.SetupSSE(); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to setup SSE: %w", err)
+			return nil, nil, fmt.Errorf("failed to setup SSE: %w", err)
 		}
 	}
 
 	// Stream processing
 	stopReason, assistantMsg, err := processChatStream(ctx, resp.Body, sseHandler, chatOpts, cont)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	return stopReason, []*StoredChatMessage{assistantMsg}, nil, nil
+	return stopReason, []*StoredChatMessage{assistantMsg}, nil
 }
 
 func processChatStream(

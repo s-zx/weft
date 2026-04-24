@@ -6,7 +6,6 @@ package aiusechat
 import (
 	"fmt"
 	"log"
-	"os"
 	"regexp"
 
 	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
@@ -39,34 +38,14 @@ const (
 )
 
 func resolveAIMode(requestedMode string, premium bool) (string, *wconfig.AIModeConfigType, error) {
-	mode := requestedMode
-
-	config, err := getAIModeConfig(mode)
+	config, err := getAIModeConfig(requestedMode)
 	if err != nil {
 		return "", nil, err
 	}
-
-	if config.WaveAICloud && !premium {
-		mode = uctypes.AIModeQuick
-		config, err = getAIModeConfig(mode)
-		if err != nil {
-			return "", nil, err
-		}
-	}
-
-	return mode, config, nil
+	return requestedMode, config, nil
 }
 
 func applyProviderDefaults(config *wconfig.AIModeConfigType) {
-	if config.Provider == uctypes.AIProvider_Wave {
-		config.WaveAICloud = true
-		if config.Endpoint == "" {
-			config.Endpoint = uctypes.DefaultAIEndpoint
-			if os.Getenv(uctypes.WaveAIEndpointEnvName) != "" {
-				config.Endpoint = os.Getenv(uctypes.WaveAIEndpointEnvName)
-			}
-		}
-	}
 	if config.Provider == uctypes.AIProvider_OpenAI {
 		if config.APIType == "" {
 			config.APIType = getOpenAIAPIType(config.Model)
@@ -247,44 +226,7 @@ func isValidAzureResourceName(name string) bool {
 	return AzureResourceNameRegex.MatchString(name)
 }
 
-var builderModeConfigs = map[string]wconfig.AIModeConfigType{
-	uctypes.AIModeBuilderDefault: {
-		DisplayName:        "Builder Default",
-		DisplayOrder:       -2,
-		DisplayIcon:        "sparkles",
-		DisplayDescription: "Good mix of speed and accuracy\n(gpt-5.4 with minimal thinking)",
-		Provider:           uctypes.AIProvider_Wave,
-		APIType:            uctypes.APIType_OpenAIResponses,
-		Model:              "gpt-5.4",
-		ThinkingLevel:      uctypes.ThinkingLevelLow,
-		Verbosity:          uctypes.VerbosityLevelLow,
-		Capabilities:       []string{uctypes.AICapabilityTools, uctypes.AICapabilityImages, uctypes.AICapabilityPdfs},
-		WaveAIPremium:      true,
-		SwitchCompat:       []string{"wavecloud"},
-	},
-	uctypes.AIModeBuilderDeep: {
-		DisplayName:        "Builder Deep",
-		DisplayOrder:       -1,
-		DisplayIcon:        "lightbulb",
-		DisplayDescription: "Slower but most capable\n(gpt-5.4 with full reasoning)",
-		Provider:           uctypes.AIProvider_Wave,
-		APIType:            uctypes.APIType_OpenAIResponses,
-		Model:              "gpt-5.4",
-		ThinkingLevel:      uctypes.ThinkingLevelMedium,
-		Verbosity:          uctypes.VerbosityLevelLow,
-		Capabilities:       []string{uctypes.AICapabilityTools, uctypes.AICapabilityImages, uctypes.AICapabilityPdfs},
-		WaveAIPremium:      true,
-		SwitchCompat:       []string{"wavecloud"},
-	},
-}
-
 func getAIModeConfig(aiMode string) (*wconfig.AIModeConfigType, error) {
-	if config, ok := builderModeConfigs[aiMode]; ok {
-		resolved := config
-		applyProviderDefaults(&resolved)
-		return &resolved, nil
-	}
-
 	fullConfig := wconfig.GetWatcher().GetFullConfig()
 	config, ok := fullConfig.WaveAIModes[aiMode]
 	if !ok {

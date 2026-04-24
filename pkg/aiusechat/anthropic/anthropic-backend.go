@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -343,18 +342,10 @@ func (p *partialJSON) FinalObject() (json.RawMessage, error) {
 	}
 }
 
-// sanitizeHostnameInError removes the Wave cloud hostname from error messages
+// sanitizeHostnameInError strips provider endpoint hostnames from error messages
+// to avoid leaking internal URLs to the user.
 func sanitizeHostnameInError(err error) error {
-	if err == nil {
-		return nil
-	}
-	errStr := err.Error()
-	parsedURL, parseErr := url.Parse(uctypes.DefaultAIEndpoint)
-	if parseErr == nil && parsedURL.Host != "" && strings.Contains(errStr, parsedURL.Host) {
-		errStr = strings.ReplaceAll(errStr, uctypes.DefaultAIEndpoint, "AI service")
-		errStr = strings.ReplaceAll(errStr, parsedURL.Host, "host")
-	}
-	return fmt.Errorf("%s", errStr)
+	return err
 }
 
 // makeThinkingOpts creates thinking options based on level and max tokens
@@ -422,26 +413,26 @@ func RunAnthropicChatStep(
 	sse *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, *anthropicChatMessage, *uctypes.RateLimitInfo, error) {
+) (*uctypes.WaveStopReason, *anthropicChatMessage, error) {
 	if sse == nil {
-		return nil, nil, nil, errors.New("sse handler is nil")
+		return nil, nil, errors.New("sse handler is nil")
 	}
 
 	// Get chat from store
 	chat := chatstore.DefaultChatStore.Get(chatOpts.ChatId)
 	if chat == nil {
-		return nil, nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
+		return nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
 	}
 
 	// Validate that chatOpts.Config match the chat's stored configuration
 	if chat.APIType != chatOpts.Config.APIType {
-		return nil, nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
+		return nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
 	}
 	if !uctypes.AreModelsCompatible(chat.APIType, chat.Model, chatOpts.Config.Model) {
-		return nil, nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
+		return nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
 	}
 	if chat.APIVersion != chatOpts.Config.APIVersion {
-		return nil, nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
+		return nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
 	}
 
 	// Context with timeout if provided.
@@ -454,7 +445,7 @@ func RunAnthropicChatStep(
 	// Validate continuation if provided
 	if cont != nil {
 		if !uctypes.AreModelsCompatible(chat.APIType, chatOpts.Config.Model, cont.Model) {
-			return nil, nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
+			return nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
 		}
 	}
 
@@ -464,7 +455,7 @@ func RunAnthropicChatStep(
 		// Cast to anthropicChatMessage
 		chatMsg, ok := genMsg.(*anthropicChatMessage)
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("expected anthropicChatMessage, got %T", genMsg)
+			return nil, nil, fmt.Errorf("expected anthropicChatMessage, got %T", genMsg)
 		}
 		// Convert to anthropicInputMessage with copied content
 		contentCopy := make([]anthropicMessageContentBlock, len(chatMsg.Content))
@@ -478,43 +469,23 @@ func RunAnthropicChatStep(
 
 	req, err := buildAnthropicHTTPRequest(ctx, anthropicMsgs, chatOpts)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	httpClient, err := aiutil.MakeHTTPClient(chatOpts.Config.ProxyURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, nil, nil, sanitizeHostnameInError(err)
+		return nil, nil, sanitizeHostnameInError(err)
 	}
 	defer resp.Body.Close()
 
-	// Parse rate limit info from header if present (do this before error check)
-	rateLimitInfo := uctypes.ParseRateLimitHeader(resp.Header.Get("X-Wave-RateLimit"))
-
 	ct := resp.Header.Get("Content-Type")
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
-		// Handle 429 rate limit with special logic
-		if resp.StatusCode == http.StatusTooManyRequests && rateLimitInfo != nil {
-			if rateLimitInfo.PReq == 0 && rateLimitInfo.Req > 0 {
-				// Premium requests exhausted, but regular requests available
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindPremiumRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-			if rateLimitInfo.Req == 0 {
-				// All requests exhausted
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-		}
-		return nil, nil, rateLimitInfo, parseAnthropicHTTPError(resp)
+		return nil, nil, parseAnthropicHTTPError(resp)
 	}
 
 	// At this point we have a valid SSE stream, so setup SSE handling
@@ -527,7 +498,7 @@ func RunAnthropicChatStep(
 	decoder := eventsource.NewDecoder(resp.Body)
 
 	stopReason, rtnMessage := handleAnthropicStreamingResp(ctx, sse, decoder, cont, chatOpts)
-	return stopReason, rtnMessage, rateLimitInfo, nil
+	return stopReason, rtnMessage, nil
 }
 
 // handleAnthropicStreamingResp processes the SSE stream after HTTP setup is complete

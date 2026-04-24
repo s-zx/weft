@@ -182,23 +182,23 @@ func RunGeminiChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, *GeminiChatMessage, *uctypes.RateLimitInfo, error) {
+) (*uctypes.WaveStopReason, *GeminiChatMessage, error) {
 	if sseHandler == nil {
-		return nil, nil, nil, errors.New("sse handler is nil")
+		return nil, nil, errors.New("sse handler is nil")
 	}
 
 	// Get chat from store
 	chat := chatstore.DefaultChatStore.Get(chatOpts.ChatId)
 	if chat == nil {
-		return nil, nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
+		return nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
 	}
 
 	// Validate that chatOpts.Config match the chat's stored configuration
 	if chat.APIType != chatOpts.Config.APIType {
-		return nil, nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
+		return nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
 	}
 	if chat.Model != chatOpts.Config.Model {
-		return nil, nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
+		return nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
 	}
 
 	// Context with timeout if provided
@@ -213,7 +213,7 @@ func RunGeminiChatStep(
 	for _, genMsg := range chat.NativeMessages {
 		chatMsg, ok := genMsg.(*GeminiChatMessage)
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("expected GeminiChatMessage, got %T", genMsg)
+			return nil, nil, fmt.Errorf("expected GeminiChatMessage, got %T", genMsg)
 		}
 
 		content := GeminiContent{
@@ -228,17 +228,17 @@ func RunGeminiChatStep(
 
 	req, err := buildGeminiHTTPRequest(ctx, contents, chatOpts)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	httpClient, err := aiutil.MakeHTTPClient(chatOpts.Config.ProxyURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, nil, fmt.Errorf("HTTP request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -248,26 +248,26 @@ func RunGeminiChatStep(
 		// Try to parse as Gemini error
 		var geminiErr GeminiErrorResponse
 		if err := json.Unmarshal(bodyBytes, &geminiErr); err == nil && geminiErr.Error != nil {
-			return nil, nil, nil, fmt.Errorf("Gemini API error (%d): %s", geminiErr.Error.Code, geminiErr.Error.Message)
+			return nil, nil, fmt.Errorf("Gemini API error (%d): %s", geminiErr.Error.Code, geminiErr.Error.Message)
 		}
 
-		return nil, nil, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, utilfn.TruncateString(string(bodyBytes), 120))
+		return nil, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, utilfn.TruncateString(string(bodyBytes), 120))
 	}
 
 	// Setup SSE if this is a new request (not a continuation)
 	if cont == nil {
 		if err := sseHandler.SetupSSE(); err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to setup SSE: %w", err)
+			return nil, nil, fmt.Errorf("failed to setup SSE: %w", err)
 		}
 	}
 
 	// Stream processing
 	stopReason, assistantMsg, err := processGeminiStream(ctx, resp.Body, sseHandler, chatOpts, cont)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	return stopReason, assistantMsg, nil, nil
+	return stopReason, assistantMsg, nil
 }
 
 // processGeminiStream handles the streaming response from Gemini

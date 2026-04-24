@@ -1407,16 +1407,6 @@ declare global {
         cpusum?: number;
     };
 
-    // uctypes.RateLimitInfo
-    type RateLimitInfo = {
-        req: number;
-        reqlimit: number;
-        preq: number;
-        preqlimit: number;
-        resetepoch: number;
-        unknown?: boolean;
-    };
-
     // wshrpc.RemoteInfo
     type RemoteInfo = {
         clientarch: string;
@@ -1492,23 +1482,13 @@ declare global {
         "app:focusfollowscursor"?: string;
         "app:tabbar"?: string;
         "feature:waveappbuilder"?: boolean;
-        "ai:*"?: boolean;
-        "ai:preset"?: string;
         "ai:apitype"?: string;
         "ai:baseurl"?: string;
         "ai:apitoken"?: string;
         "ai:apitokensecretname"?: string;
-        "ai:name"?: string;
         "ai:model"?: string;
-        "ai:orgid"?: string;
-        "ai:apiversion"?: string;
         "ai:maxtokens"?: number;
         "ai:timeoutms"?: number;
-        "ai:proxyurl"?: string;
-        "ai:fontsize"?: number;
-        "ai:fixedfontsize"?: number;
-        "waveai:showcloudmodes"?: boolean;
-        "waveai:defaultmode"?: string;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
@@ -1679,7 +1659,6 @@ declare global {
         "loc:countrycode"?: string;
         "loc:regioncode"?: string;
         "settings:customwidgets"?: number;
-        "settings:customaipresets"?: number;
         "settings:customsettings"?: number;
         "settings:customaimodes"?: number;
         "settings:secretscount"?: number;
@@ -1780,7 +1759,6 @@ declare global {
         "loc:countrycode"?: string;
         "loc:regioncode"?: string;
         "settings:customwidgets"?: number;
-        "settings:customaipresets"?: number;
         "settings:customsettings"?: number;
         "settings:customaimodes"?: number;
         "settings:secretscount"?: number;

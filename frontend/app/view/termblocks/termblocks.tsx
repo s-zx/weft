@@ -1,7 +1,7 @@
 // Copyright 2026, s-zx
 // SPDX-License-Identifier: Apache-2.0
 
-import { UseChatSendMessageType, UseChatSetMessagesType } from "@/app/aipanel/aitypes";
+import { UseChatSendMessageType, UseChatSetMessagesType } from "@/store/aitypes";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { getApi, getBlockMetaKeyAtom, getSettingsKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";

@@ -1,7 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveUIMessage, WaveUIMessagePart } from "@/app/aipanel/aitypes";
+import { WaveUIMessage, WaveUIMessagePart } from "@/store/aitypes";
 import { WaveStreamdown } from "@/app/element/streamdown";
 import { globalStore } from "@/app/store/jotaiStore";
 import { RpcApi } from "@/app/store/wshclientapi";

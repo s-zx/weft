@@ -1,7 +1,6 @@
 // Copyright 2025, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveAIModel } from "@/app/aipanel/waveai-model";
 import { BuilderAppPanelModel } from "@/builder/store/builder-apppanel-model";
 import { BuilderBuildPanelModel } from "@/builder/store/builder-buildpanel-model";
 import { atoms } from "@/store/global";
@@ -32,31 +31,15 @@ EmptyStateView.displayName = "EmptyStateView";
 
 const ErrorStateView = memo(({ errorMsg }: { errorMsg: string }) => {
     const displayMsg = errorMsg && errorMsg.trim() ? errorMsg : "Unknown Error";
-    const waveAIModel = WaveAIModel.getInstance();
     const buildPanelModel = BuilderBuildPanelModel.getInstance();
     const appPanelModel = BuilderAppPanelModel.getInstance();
     const outputLines = useAtomValue(buildPanelModel.outputLines);
-    const isStreaming = useAtomValue(waveAIModel.isAIStreaming);
+    const isStreaming = false;
 
     const isSecretError = displayMsg.includes("ERR-SECRET");
 
-    const getBuildContext = () => {
-        const filteredLines = outputLines.filter((line) => !line.startsWith("[debug]"));
-        const buildOutput = filteredLines.join("\n").trim();
-        return `Build Error:\n\`\`\`\n${displayMsg}\n\`\`\`\n\nBuild Output:\n\`\`\`\n${buildOutput}\n\`\`\``;
-    };
-
-    const handleAddToContext = () => {
-        const context = getBuildContext();
-        waveAIModel.appendText(context, true);
-        waveAIModel.focusInput();
-    };
-
-    const handleAskAIToFix = async () => {
-        const context = getBuildContext();
-        waveAIModel.appendText("Please help me fix this build error:\n\n" + context, true);
-        await waveAIModel.handleSubmit();
-    };
+    const handleAddToContext = () => {};
+    const handleAskAIToFix = async () => {};
 
     const handleGoToSecrets = () => {
         appPanelModel.setActiveTab("secrets");

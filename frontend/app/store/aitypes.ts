@@ -1,17 +1,15 @@
-// Copyright 2025, Command Line Inc.
+// Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
 import { ChatRequestOptions, FileUIPart, UIMessage, UIMessagePart } from "ai";
 
 type WaveUIDataTypes = {
-    // pkg/aiusechat/uctypes/uctypes.go UIMessageDataUserFile
     userfile: {
         filename: string;
         size: number;
         mimetype: string;
         previewurl?: string;
     };
-    // pkg/aiusechat/uctypes/uctypes.go UIMessageDataToolUse
     tooluse: {
         toolcallid: string;
         toolname: string;
@@ -24,7 +22,6 @@ type WaveUIDataTypes = {
         writebackupfilename?: string;
         inputfilename?: string;
     };
-
     toolprogress: {
         toolcallid: string;
         toolname: string;

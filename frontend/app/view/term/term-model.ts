@@ -1,8 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UseChatSendMessageType, UseChatSetMessagesType } from "@/app/aipanel/aitypes";
-import { WaveAIModel } from "@/app/aipanel/waveai-model";
+import { UseChatSendMessageType, UseChatSetMessagesType } from "@/store/aitypes";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -600,16 +599,7 @@ export class TermViewModel implements ViewModel {
     }
 
     getTermAgentMode(): string {
-        const aiModel = WaveAIModel.getInstance();
-        const currentMode = globalStore.get(aiModel.currentAIMode);
-        if (currentMode && aiModel.isValidMode(currentMode)) {
-            return currentMode;
-        }
-        const defaultMode = globalStore.get(aiModel.defaultModeAtom);
-        if (defaultMode && aiModel.isValidMode(defaultMode)) {
-            return defaultMode;
-        }
-        return currentMode ?? defaultMode ?? "";
+        return "waveai@balanced";
     }
 
     openTermAgentComposer() {
@@ -1115,22 +1105,6 @@ export class TermViewModel implements ViewModel {
                     }
                 },
             });
-            menu.push({ type: "separator" });
-            menu.push({
-                label: "Send to Wave AI",
-                click: () => {
-                    if (selection) {
-                        const aiModel = WaveAIModel.getInstance();
-                        aiModel.appendText(selection, true, { scrollToBottom: true });
-                        const layoutModel = WorkspaceLayoutModel.getInstance();
-                        if (!layoutModel.getAIPanelVisible()) {
-                            layoutModel.setAIPanelVisible(true);
-                        }
-                        aiModel.focusInput();
-                    }
-                },
-            });
-
             menu.push({ type: "separator" });
         }
 

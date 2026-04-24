@@ -37,6 +37,9 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 	if termCtx := BuildTerminalContext(opts.Session); termCtx != "" {
 		systemPrompt = append(systemPrompt, termCtx)
 	}
+	if skills := DiscoverSkills(opts.Session.Cwd); len(skills) > 0 {
+		systemPrompt = append(systemPrompt, BuildSkillsContext(skills))
+	}
 
 	chatOpts := uctypes.WaveChatOpts{
 		ChatId:               AgentChatStorePrefix + opts.Session.ChatID,

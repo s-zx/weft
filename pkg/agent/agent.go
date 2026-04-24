@@ -20,6 +20,7 @@ import (
 
 const AgentChatStorePrefix = "agent:"
 const AgentSourceName = "crest-agent"
+const DefaultMaxAgentSteps = 50
 
 // AgentOpts bundles everything RunAgent needs for a single turn.
 type AgentOpts struct {
@@ -50,6 +51,7 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 		TabId:                opts.Session.TabID,
 		AllowNativeWebSearch: false,
 		Source:               AgentSourceName,
+		MaxSteps:             DefaultMaxAgentSteps,
 	}
 
 	return aiusechat.WaveAIPostMessageWrap(ctx, sseHandler, opts.UserMsg, chatOpts)

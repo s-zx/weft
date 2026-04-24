@@ -222,6 +222,7 @@ const (
 	StopKindError            StopReasonKind = "error"
 	StopKindPauseTurn        StopReasonKind = "pause_turn"
 	StopKindRateLimit StopReasonKind = "rate_limit"
+	StopKindStepBudget       StopReasonKind = "step_budget"
 )
 
 type WaveToolCall struct {
@@ -494,6 +495,7 @@ type WaveChatOpts struct {
 	BuilderId            string
 	BuilderAppId         string
 	Source               string
+	MaxSteps             int
 
 	// ephemeral to the step
 	TabState       string

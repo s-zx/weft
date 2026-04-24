@@ -373,6 +373,7 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 		IsLocal:       isLocal,
 	}
 	firstStep := true
+	stepBudgetWarned := false
 	var cont *uctypes.WaveContinueResponse
 	for {
 		if chatOpts.TabStateGenerator != nil {
@@ -389,6 +390,21 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 				chatOpts.AppGoFile = appGoFile
 				chatOpts.AppStaticFiles = appStaticFiles
 				chatOpts.PlatformInfo = platformInfo
+			}
+		}
+		if chatOpts.MaxSteps > 0 && metrics.RequestCount >= chatOpts.MaxSteps {
+			_ = sseHandler.AiMsgError(fmt.Sprintf("Step budget exhausted (%d/%d steps)", metrics.RequestCount, chatOpts.MaxSteps))
+			_ = sseHandler.AiMsgFinish("step_budget", nil)
+			metrics.HadError = true
+			break
+		}
+		if chatOpts.MaxSteps > 0 && !stepBudgetWarned {
+			remaining := chatOpts.MaxSteps - metrics.RequestCount
+			warningAt := max(chatOpts.MaxSteps/5, 1)
+			if remaining <= warningAt {
+				chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
+					fmt.Sprintf("IMPORTANT: You have %d steps remaining out of %d total. Begin wrapping up your current task.", remaining, chatOpts.MaxSteps))
+				stepBudgetWarned = true
 			}
 		}
 		stopReason, rtnMessages, err := runAIChatStep(ctx, sseHandler, backend, chatOpts, cont)

@@ -21,5 +21,6 @@ func ReadTextFile(approval func(any) string) uctypes.ToolDefinition {
 	t := aiusechat.GetReadTextFileToolDefinition()
 	t.ToolLogName = "agent:read_text_file"
 	t.ToolApproval = approval
+	t.Parallel = true
 	return t
 }

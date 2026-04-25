@@ -103,12 +103,21 @@ type ToolDefinition struct {
 	Strict               bool           `json:"strict,omitempty"`
 	RequiredCapabilities []string       `json:"requiredcapabilities,omitempty"`
 
+	Parallel bool `json:"-"`
+
 	ToolTextCallback func(any) (string, error)                     `json:"-"`
 	ToolAnyCallback  func(any, *UIMessageDataToolUse) (any, error) `json:"-"` // *UIMessageDataToolUse will NOT be nil
 	ToolCallDesc     func(any, any, *UIMessageDataToolUse) string  `json:"-"` // passed input, output (may be nil), *UIMessageDataToolUse (may be nil)
 	ToolApproval     func(any) string                              `json:"-"`
 	ToolVerifyInput  func(any, *UIMessageDataToolUse) error        `json:"-"` // *UIMessageDataToolUse will NOT be nil
 	ToolProgressDesc func(any) ([]string, error)                   `json:"-"`
+}
+
+type ToolCallOutcome struct {
+	Result     AIToolResult
+	Audit      ToolAuditEvent
+	IsError    bool
+	ToolLogName string
 }
 
 func (td *ToolDefinition) Clean() *ToolDefinition {

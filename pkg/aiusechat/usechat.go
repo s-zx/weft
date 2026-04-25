@@ -14,6 +14,7 @@ import (
 	"os/user"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -260,7 +261,7 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 	return result
 }
 
-func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh, metrics *uctypes.AIMetrics) uctypes.AIToolResult {
+func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh) uctypes.ToolCallOutcome {
 	inputJSON, _ := json.Marshal(toolCall.Input)
 	logutil.DevPrintf("TOOLUSE name=%s id=%s input=%s approval=%q\n", toolCall.Name, toolCall.ID, utilfn.TruncateString(string(inputJSON), 40), toolCall.ToolUseData.Approval)
 
@@ -275,39 +276,54 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 
 	durationMs := time.Since(startTs).Milliseconds()
 
-	if result.ErrorText != "" {
+	isError := result.ErrorText != ""
+	if isError {
 		log.Printf("  error=%s\n", result.ErrorText)
-		metrics.ToolUseErrorCount++
 	} else {
 		log.Printf("  result=%s\n", utilfn.TruncateString(result.Text, 40))
 	}
 
+	toolLogName := ""
 	if toolDef != nil && toolDef.ToolLogName != "" {
-		metrics.ToolDetail[toolDef.ToolLogName]++
+		toolLogName = toolDef.ToolLogName
 	}
 
-	outcome := "success"
-	if result.ErrorText != "" {
-		outcome = "error"
+	outcomeStr := "success"
+	if isError {
+		outcomeStr = "error"
 	}
-	metrics.AuditLog = append(metrics.AuditLog, uctypes.ToolAuditEvent{
-		Timestamp:  startTs.UnixMilli(),
-		ChatId:     chatOpts.ChatId,
-		ToolName:   toolCall.Name,
-		ToolCallId: toolCall.ID,
-		InputArgs:  utilfn.TruncateString(string(inputJSON), 200),
-		Approval:   approval,
-		DurationMs: durationMs,
-		Outcome:    outcome,
-		ErrorText:  result.ErrorText,
-	})
 
 	if toolCall.ToolUseData != nil {
 		_ = sseHandler.AiMsgData("data-tooluse", toolCall.ID, *toolCall.ToolUseData)
 		updateToolUseDataInChat(backend, chatOpts, toolCall.ID, *toolCall.ToolUseData)
 	}
 
-	return result
+	return uctypes.ToolCallOutcome{
+		Result: result,
+		Audit: uctypes.ToolAuditEvent{
+			Timestamp:  startTs.UnixMilli(),
+			ChatId:     chatOpts.ChatId,
+			ToolName:   toolCall.Name,
+			ToolCallId: toolCall.ID,
+			InputArgs:  utilfn.TruncateString(string(inputJSON), 200),
+			Approval:   approval,
+			DurationMs: durationMs,
+			Outcome:    outcomeStr,
+			ErrorText:  result.ErrorText,
+		},
+		IsError:     isError,
+		ToolLogName: toolLogName,
+	}
+}
+
+func applyOutcome(metrics *uctypes.AIMetrics, outcome uctypes.ToolCallOutcome) {
+	if outcome.IsError {
+		metrics.ToolUseErrorCount++
+	}
+	if outcome.ToolLogName != "" {
+		metrics.ToolDetail[outcome.ToolLogName]++
+	}
+	metrics.AuditLog = append(metrics.AuditLog, outcome.Audit)
 }
 
 func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopReason, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh, metrics *uctypes.AIMetrics) {
@@ -331,16 +347,47 @@ func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopRea
 			RegisterToolApproval(toolCall.ID, sseHandler)
 		}
 	}
-	// At this point, all ToolCalls are guaranteed to have non-nil ToolUseData
+	allParallel := len(stopReason.ToolCalls) > 1
+	if allParallel {
+		for _, tc := range stopReason.ToolCalls {
+			toolDef := chatOpts.GetToolDefinition(tc.Name)
+			if toolDef == nil || !toolDef.Parallel {
+				allParallel = false
+				break
+			}
+			if tc.ToolUseData != nil && tc.ToolUseData.Approval == uctypes.ApprovalNeedsApproval {
+				allParallel = false
+				break
+			}
+		}
+	}
 
 	var toolResults []uctypes.AIToolResult
-	for _, toolCall := range stopReason.ToolCalls {
-		if sseHandler.Err() != nil {
-			log.Printf("AI tool processing stopped: %v\n", sseHandler.Err())
-			break
+	if allParallel {
+		outcomes := make([]uctypes.ToolCallOutcome, len(stopReason.ToolCalls))
+		var wg sync.WaitGroup
+		for i, tc := range stopReason.ToolCalls {
+			wg.Add(1)
+			go func(idx int, toolCall uctypes.WaveToolCall) {
+				defer wg.Done()
+				outcomes[idx] = processToolCall(backend, toolCall, chatOpts, sseHandler)
+			}(i, tc)
 		}
-		result := processToolCall(backend, toolCall, chatOpts, sseHandler, metrics)
-		toolResults = append(toolResults, result)
+		wg.Wait()
+		for _, outcome := range outcomes {
+			toolResults = append(toolResults, outcome.Result)
+			applyOutcome(metrics, outcome)
+		}
+	} else {
+		for _, toolCall := range stopReason.ToolCalls {
+			if sseHandler.Err() != nil {
+				log.Printf("AI tool processing stopped: %v\n", sseHandler.Err())
+				break
+			}
+			outcome := processToolCall(backend, toolCall, chatOpts, sseHandler)
+			toolResults = append(toolResults, outcome.Result)
+			applyOutcome(metrics, outcome)
+		}
 	}
 
 	// Cleanup: unregister approvals, remove incomplete/canceled tool calls, and filter results

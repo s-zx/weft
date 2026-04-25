@@ -13,5 +13,6 @@ func ReadDir(approval func(any) string) uctypes.ToolDefinition {
 	t := aiusechat.GetReadDirToolDefinition()
 	t.ToolLogName = "agent:read_dir"
 	t.ToolApproval = approval
+	t.Parallel = true
 	return t
 }

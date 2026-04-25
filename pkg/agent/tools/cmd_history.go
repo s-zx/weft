@@ -90,6 +90,7 @@ func CmdHistory(defaultBlockID string, approval func(any) string) uctypes.ToolDe
 			}
 			return runCmdHistory(context.Background(), parsed)
 		},
+		Parallel:     true,
 		ToolApproval: approval,
 	}
 }

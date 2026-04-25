@@ -14,5 +14,6 @@ func GetScrollback(tabID string, approval func(any) string) uctypes.ToolDefiniti
 	t := aiusechat.GetTermGetScrollbackToolDefinition(tabID)
 	t.ToolLogName = "agent:get_scrollback"
 	t.ToolApproval = approval
+	t.Parallel = true
 	return t
 }

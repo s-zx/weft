@@ -6,9 +6,10 @@ package agent
 import "github.com/s-zx/crest/pkg/aiusechat/uctypes"
 
 const (
-	ModeAsk  = "ask"
-	ModePlan = "plan"
-	ModeDo   = "do"
+	ModeAsk   = "ask"
+	ModePlan  = "plan"
+	ModeDo    = "do"
+	ModeBench = "bench"
 )
 
 const (
@@ -38,6 +39,8 @@ type Mode struct {
 	FailureBudget int
 }
 
+const BenchStepBudget = 100
+
 var modes = map[string]*Mode{
 	ModeAsk: {
 		Name:        ModeAsk,
@@ -45,6 +48,7 @@ var modes = map[string]*Mode{
 		ToolNames: []string{
 			"read_text_file",
 			"read_dir",
+			"search",
 			"get_scrollback",
 			"cmd_history",
 			"web_fetch",
@@ -62,6 +66,7 @@ var modes = map[string]*Mode{
 		ToolNames: []string{
 			"read_text_file",
 			"read_dir",
+			"search",
 			"get_scrollback",
 			"cmd_history",
 			"write_plan",
@@ -72,6 +77,7 @@ var modes = map[string]*Mode{
 			AutoApproveTools: map[string]bool{
 				"read_text_file": true,
 				"read_dir":       true,
+				"search":         true,
 				"get_scrollback": true,
 				"cmd_history":    true,
 				"write_plan":     true,
@@ -86,10 +92,12 @@ var modes = map[string]*Mode{
 		ToolNames: []string{
 			"read_text_file",
 			"read_dir",
+			"search",
 			"get_scrollback",
 			"cmd_history",
 			"write_text_file",
 			"edit_text_file",
+			"multi_edit",
 			"shell_exec",
 			"create_block",
 			"focus_block",
@@ -99,6 +107,8 @@ var modes = map[string]*Mode{
 			"browser.screenshot",
 			"web_fetch",
 			"spawn_task",
+			"todo_write",
+			"todo_read",
 		},
 		AllowMutation: true,
 		Approval: ApprovalPolicy{
@@ -121,6 +131,31 @@ var modes = map[string]*Mode{
 		},
 		StepBudget:    DefaultStepBudget,
 		FailureBudget: DefaultFailureBudget,
+	},
+	ModeBench: {
+		Name:        ModeBench,
+		DisplayName: "Bench",
+		ToolNames: []string{
+			"read_text_file",
+			"read_dir",
+			"search",
+			"get_scrollback",
+			"cmd_history",
+			"write_text_file",
+			"edit_text_file",
+			"multi_edit",
+			"shell_exec",
+			"web_fetch",
+			"spawn_task",
+			"todo_write",
+			"todo_read",
+		},
+		AllowMutation: true,
+		Approval: ApprovalPolicy{
+			AutoApproveAll: true,
+		},
+		StepBudget:    BenchStepBudget,
+		FailureBudget: 10,
 	},
 }
 

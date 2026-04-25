@@ -10,7 +10,7 @@ import (
 )
 
 func TestLookupMode_ValidModes(t *testing.T) {
-	for _, name := range []string{ModeAsk, ModePlan, ModeDo} {
+	for _, name := range []string{ModeAsk, ModePlan, ModeDo, ModeBench} {
 		m, ok := LookupMode(name)
 		if !ok {
 			t.Fatalf("LookupMode(%q) returned ok=false", name)
@@ -86,18 +86,23 @@ func TestResolveApproval_NilMode(t *testing.T) {
 
 func TestModeToolNames(t *testing.T) {
 	askMode, _ := LookupMode(ModeAsk)
-	if len(askMode.ToolNames) != 5 {
-		t.Fatalf("ask mode should have 5 tools, got %d", len(askMode.ToolNames))
+	if len(askMode.ToolNames) != 6 {
+		t.Fatalf("ask mode should have 6 tools, got %d", len(askMode.ToolNames))
 	}
 
 	planMode, _ := LookupMode(ModePlan)
-	if len(planMode.ToolNames) != 6 {
-		t.Fatalf("plan mode should have 6 tools, got %d", len(planMode.ToolNames))
+	if len(planMode.ToolNames) != 7 {
+		t.Fatalf("plan mode should have 7 tools, got %d", len(planMode.ToolNames))
 	}
 
 	doMode, _ := LookupMode(ModeDo)
-	if len(doMode.ToolNames) != 15 {
-		t.Fatalf("do mode should have 13 tools, got %d", len(doMode.ToolNames))
+	if len(doMode.ToolNames) != 19 {
+		t.Fatalf("do mode should have 19 tools, got %d", len(doMode.ToolNames))
+	}
+
+	benchMode, _ := LookupMode(ModeBench)
+	if len(benchMode.ToolNames) != 13 {
+		t.Fatalf("bench mode should have 13 tools, got %d", len(benchMode.ToolNames))
 	}
 }
 
@@ -113,5 +118,12 @@ func TestModeAllowMutation(t *testing.T) {
 	doMode, _ := LookupMode(ModeDo)
 	if !doMode.AllowMutation {
 		t.Fatal("do mode should allow mutation")
+	}
+	benchMode, _ := LookupMode(ModeBench)
+	if !benchMode.AllowMutation {
+		t.Fatal("bench mode should allow mutation")
+	}
+	if !benchMode.Approval.AutoApproveAll {
+		t.Fatal("bench mode should auto-approve all")
 	}
 }

@@ -63,6 +63,14 @@ func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 		return tools.BrowserClick(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
 	case "browser.screenshot":
 		return tools.BrowserScreenshot(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+	case "search":
+		return tools.Search(approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+	case "multi_edit":
+		return tools.MultiEdit(approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+	case "todo_write":
+		return tools.TodoWrite(AgentChatStorePrefix+sess.ChatID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+	case "todo_read":
+		return tools.TodoRead(AgentChatStorePrefix+sess.ChatID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
 	case "web_fetch":
 		return tools.WebFetch(approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
 	case "spawn_task":

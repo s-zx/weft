@@ -315,19 +315,26 @@ timelineAtom = atom((get) => {
 **Why file restore instead of message removal:** Removing messages doesn't undo file changes on disk. Restoring files keeps history intact (the user can see what was tried) while reverting the actual damage. Matches Claude Code's mental model.
 
 **Data flow:**
-1. Tool writes/edits a file → `filebackup.MakeFileBackup(path)` returns backup path
-2. Tool sets `toolUseData.WriteBackupFileName = backup`, `InputFileName = path`
+1. Tool writes/edits a file → `filebackup.MakeFileBackup(path)` returns backup path (with sibling `.json` capturing original perm + mtime)
+2. Tool sets `toolUseData.WriteBackupFileName = backup`, `InputFileName = expandedPath` (absolute, tilde expanded — the path operated on)
 3. `processToolCall` extracts these into `ToolCallOutcome.FileChanged/FileBackup/FileIsNew`
 4. `applyOutcome` calls `FileChangeCallback(path, backup, isNew)`
-5. Callback writes to `CheckpointStore` keyed by chatId + checkpoint UUID
+5. Callback computes SHA-256 of file content (post-write), writes `FileChange{Path, BackupPath, IsNew, ContentHash}` to `CheckpointStore`
 6. User types `:rewind` → POST `/api/agent-rewind` with chatId
-7. `RewindLast()` finds the second-to-last checkpoint, restores files modified after that point (read backup → write to original path; or `os.Remove` for created files)
+7. `rewindToLocked` collects changes from rewound turns, **de-duplicates by path keeping the first-recorded entry per path** (so a file written twice in one turn restores to the pre-turn original, not an intermediate state); for each entry it hashes the current file and skips with a log if it doesn't match `ContentHash` (user edited externally); otherwise calls `filebackup.RestoreBackup` (which honors the original mode) or `os.Remove` for created files
 8. Conversation history untouched
 
+**Why the per-path de-dup:** within one turn, a tool may write file A then edit it again. Backup #1 = original A, backup #2 = post-write-1 A. Naive replay applies both in order, leaving A at the post-write-1 state. Keeping only the first-recorded backup per path restores to the true original.
+
+**Why the content-hash guard:** `RestoreBackup` would otherwise silently overwrite manual edits the user made to the file after the agent's last write. Hash mismatch ⇒ skip + log; the user can investigate and decide whether to manually revert.
+
+**Memory:** `MaxCheckpointsPerChat = 100` per chat — when exceeded, oldest checkpoints drop. Prevents long sessions from bloating the in-memory store.
+
 **Limitations:**
-- Only Write/Edit tool changes tracked. Bash commands (`rm`, `sed -i`) bypass the backup mechanism.
-- Backups are temp files; if the OS clears `/tmp` between sessions, rewind fails for stale checkpoints.
-- Directory ops (mkdir/move) aren't undone.
+- Only Write/Edit/Delete tool changes tracked. Bash commands (`rm`, `sed -i`) bypass the backup mechanism.
+- Backups are temp files; if the OS clears the cache dir between sessions, rewind fails for stale checkpoints.
+- Directory ops (mkdir/move) aren't undone — empty parent dirs from removed new files are left in place.
+- No persistence: server restart clears the in-memory checkpoint store; backup files on disk become orphaned (cleaned by `filebackup.CleanupOldBackups` after 5 days).
 
 ---
 

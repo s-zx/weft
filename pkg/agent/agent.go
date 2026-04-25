@@ -73,9 +73,10 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 func makeFileChangeRecorder(chatId string, checkpointId string) func(string, string, bool) {
 	return func(path, backupPath string, isNew bool) {
 		DefaultCheckpointStore.RecordFileChange(chatId, checkpointId, FileChange{
-			Path:       path,
-			BackupPath: backupPath,
-			IsNew:      isNew,
+			Path:        path,
+			BackupPath:  backupPath,
+			IsNew:       isNew,
+			ContentHash: CurrentFileHash(path),
 		})
 	}
 }

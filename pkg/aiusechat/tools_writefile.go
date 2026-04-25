@@ -126,7 +126,7 @@ func verifyWriteTextFileInput(input any, toolUseData *uctypes.UIMessageDataToolU
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
 
 	existing, readErr := os.ReadFile(expandedPath)
 	if readErr != nil && !os.IsNotExist(readErr) {
@@ -272,7 +272,7 @@ func verifyEditTextFileInput(input any, toolUseData *uctypes.UIMessageDataToolUs
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
 
 	original, modified, dryRunErr := EditTextFileDryRun(input, "")
 	if dryRunErr == nil {
@@ -466,7 +466,7 @@ func verifyDeleteTextFileInput(input any, toolUseData *uctypes.UIMessageDataTool
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
 	return nil
 }
 

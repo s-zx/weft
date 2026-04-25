@@ -1,0 +1,38 @@
+{
+  "name": "do-write-two-files",
+  "description": "Agent writes two files in sequence",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create index.html with a basic HTML skeleton and style.css with a body background color of #f0f0f0.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/index.html", "contents": "<!DOCTYPE html>\n<html>\n<head>\n  <link rel=\"stylesheet\" href=\"style.css\">\n  <title>Page</title>\n</head>\n<body>\n  <h1>Hello</h1>\n</body>\n</html>"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/style.css", "contents": "body {\n  background-color: #f0f0f0;\n}"}}
+          ]
+        },
+        {
+          "text": "Created both files: index.html with a basic HTML skeleton and style.css with the background color set to #f0f0f0."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file", "write_text_file"],
+    "files_created": ["index.html", "style.css"],
+    "files_contain": {
+      "index.html": "<h1>Hello</h1>",
+      "style.css": "#f0f0f0"
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "ask-list-dir-empty",
+  "description": "Agent lists a directory that contains only an empty subdirectory",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "workspace/emptydir/.gitkeep": ""
+    }
+  },
+  "turns": [
+    {
+      "user": "What is inside the workspace directory?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_dir", "input": {"path": "{{CWD}}/workspace"}}
+          ]
+        },
+        {
+          "text": "The workspace directory contains a single subdirectory called emptydir, which has only a .gitkeep placeholder file."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_dir"],
+    "final_text_contains": ["emptydir"]
+  }
+}

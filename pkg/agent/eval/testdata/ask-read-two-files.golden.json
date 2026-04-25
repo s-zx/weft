@@ -1,0 +1,37 @@
+{
+  "name": "ask-read-two-files",
+  "description": "Agent reads two files sequentially to answer a question about both",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "config.yaml": "port: 8080\nhost: localhost",
+      "env.txt": "ENV=production\nDEBUG=false"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read both config.yaml and env.txt and tell me the port and environment.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/config.yaml"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/env.txt"}}
+          ]
+        },
+        {
+          "text": "From the two files:\n- The port is 8080 (from config.yaml)\n- The environment is production (from env.txt)"
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file", "read_text_file"],
+    "final_text_contains": ["8080", "production"]
+  }
+}

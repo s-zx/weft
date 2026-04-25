@@ -1,0 +1,37 @@
+{
+  "name": "do-create-and-verify",
+  "description": "Agent writes a file and then reads it back to verify its contents",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a file called output.txt with the text 'computation complete' and then read it back to confirm.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/output.txt", "contents": "computation complete"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/output.txt"}}
+          ]
+        },
+        {
+          "text": "Created output.txt and verified its contents. The file contains: \"computation complete\"."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file", "read_text_file"],
+    "files_created": ["output.txt"],
+    "files_contain": {
+      "output.txt": "computation complete"
+    }
+  }
+}

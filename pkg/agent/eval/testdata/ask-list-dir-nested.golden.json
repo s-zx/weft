@@ -1,0 +1,34 @@
+{
+  "name": "ask-list-dir-nested",
+  "description": "Agent lists a nested directory structure and reports its contents",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "project/src/main.go": "package main\n\nfunc main() {}",
+      "project/src/handler/api.go": "package handler",
+      "project/src/handler/middleware.go": "package handler",
+      "project/docs/README.md": "# Docs",
+      "project/Makefile": "build:\n\tgo build ./..."
+    }
+  },
+  "turns": [
+    {
+      "user": "List the files inside the project directory.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_dir", "input": {"path": "{{CWD}}/project"}}
+          ]
+        },
+        {
+          "text": "The project directory contains:\n- Makefile\n- docs/ (with README.md)\n- src/ (with main.go and handler/ subdirectory containing api.go and middleware.go)"
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_dir"],
+    "final_text_contains": ["Makefile", "src"]
+  }
+}

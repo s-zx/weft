@@ -1,0 +1,30 @@
+{
+  "name": "ask-read-large-file",
+  "description": "Agent reads a multi-line file and responds with a key line from it",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "data.log": "2024-01-01 INFO  server started\n2024-01-02 WARN  disk usage at 85%\n2024-01-03 ERROR connection pool exhausted\n2024-01-04 INFO  backup completed\n2024-01-05 INFO  server healthy\n2024-01-06 WARN  memory usage high\n2024-01-07 INFO  deploy v2.3.1 rolled out\n2024-01-08 ERROR timeout on upstream service\n2024-01-09 INFO  recovered\n2024-01-10 INFO  all systems nominal"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read data.log and tell me about any errors.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/data.log"}}
+          ]
+        },
+        {
+          "text": "The log file contains two errors:\n1. On 2024-01-03: \"connection pool exhausted\"\n2. On 2024-01-08: \"timeout on upstream service\""
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file"],
+    "final_text_contains": ["connection pool exhausted"]
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "name": "do-read-then-write",
+  "description": "Agent reads a file, then writes a modified version of it",
+  "mode": "do",
+  "setup": {
+    "files": {
+      "names.txt": "alice\nbob\ncharlie"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read names.txt and rewrite it with the names in uppercase.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/names.txt"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/names.txt", "contents": "ALICE\nBOB\nCHARLIE"}}
+          ]
+        },
+        {
+          "text": "Read the names and rewrote names.txt with all names in uppercase."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file", "write_text_file"],
+    "files_contain": {
+      "names.txt": "ALICE\nBOB\nCHARLIE"
+    }
+  }
+}

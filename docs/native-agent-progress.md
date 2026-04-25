@@ -105,17 +105,28 @@ Tracking the prioritized roadmap in [`agent-optimization-roadmap.md`](./agent-op
 - [x] Anthropic prompt caching — `cache_control: {type: "ephemeral"}` on last system prompt block + last tool definition. Uses `anthropicCachedToolDef` wrapper. Cache usage already tracked from responses.
 - [x] Parallel tool execution — `Parallel` field on ToolDefinition. When all tool calls in a step are Parallel=true and none need approval, runs them concurrently via sync.WaitGroup. Marked: read_text_file, read_dir, get_scrollback, cmd_history.
 - [x] Golden transcripts expanded to 21 — 18 new tests covering read/write/plan modes, error cases, multi-turn, cross-tool flows.
-- [x] Live token counter in overlay — Backend sends `data-usage` SSE event after each step. Frontend `TermAgentTokenCounter` renders formatted total in overlay header.
-- [x] Runtime model switcher — `:model <name>` inline command in overlay. Frontend intercepts, stores override, includes `modeloverride` in request. Backend applies override to AIOptsType.
-- [ ] Diff preview for write_text_file — needs UI design: backend generates unified diff, frontend renders diff viewer with approve/reject. Hold for live testing.
-- [ ] Plan → Do handoff — needs UI design: "Execute Plan" button after :plan completes, switches to :do mode with plan as context. Hold for live testing.
+- [x] Live token counter — Backend sends `data-usage` SSE event after each step. Frontend `TermAgentTokenCounter` renders formatted total.
+- [x] Runtime model switcher — `:model <name>` inline command. Frontend intercepts, stores override, resets chatId. Backend applies override to AIOptsType.
+- [x] Diff preview for write_text_file + edit_text_file — Backend sends `originalcontent` + `modifiedcontent`. Frontend uses jsdiff `structuredPatch` for context-aware hunks with line-level coloring. Handles new file and no-changes cases.
+- [x] Plan → Do handoff — "Execute Plan" button after write_plan completes. Stays in same session, switches to `:do` mode, sends minimal trigger. Backend reads plan file and injects into system prompt.
+
+## Warp-Style Inline Agent Blocks ✅
+
+Replaced the floating overlay with inline agent blocks in the termblocks timeline:
+- `TimelineEntry` union type: `cmd | agent-user | agent-response`
+- `timelineAtom` merges CmdBlocks + agent entries sorted by timestamp
+- `TermAgentChatProvider` hosts `useChat` invisibly, syncs messages into timeline
+- `:` prefix in main input activates agent mode (accent color + mode badge)
+- `InlineAgentUserMsg` + `InlineAgentResponse` render inline in the block stream
+- Auto-scroll follows agent streaming
+- Overlay removed entirely
 
 ## Architecture
 
 - **`pkg/agent` = policy, `pkg/aiusechat` = mechanism.** One-way dependency.
 - **Tool adapters** wrap `aiusechat.GetXxxToolDefinition()` + inject mode-aware approval closures.
 - **`shell_exec`** creates user-visible cmd-blocks — the Crest differentiator.
-- **`TermAgentModel` interface** — decouples overlay from any specific ViewModel.
+- **`TermAgentModel` interface** — decouples chat provider from any specific ViewModel.
 - **Settings fallback** — agent tries waveai mode system first, then reads `settings.json` directly.
 - **API keys via secretstore** — stored in OS keychain, referenced by `ai:apitokensecretname`.
 - **ForgeCode attribution**: Apache 2.0 preserved in `NOTICE` files + `UPSTREAM.md`.

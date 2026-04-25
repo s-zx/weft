@@ -633,6 +633,9 @@ func WaveAIPostMessageWrap(ctx context.Context, sseHandler *sse.SSEHandlerCh, me
 			metrics.ImageCount, metrics.PDFCount, metrics.TextDocCount, metrics.TextLen, metrics.RequestDuration, metrics.HadError)
 
 		sendAIMetricsTelemetry(ctx, metrics)
+		if chatOpts.MetricsCallback != nil {
+			chatOpts.MetricsCallback(metrics)
+		}
 	}
 	return err
 }

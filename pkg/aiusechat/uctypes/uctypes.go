@@ -521,6 +521,7 @@ type WaveChatOpts struct {
 	Source               string
 	MaxSteps             int
 	ContextBudget        int
+	MetricsCallback      func(*AIMetrics)
 
 	// ephemeral to the step
 	TabState       string

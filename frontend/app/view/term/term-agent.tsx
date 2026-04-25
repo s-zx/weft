@@ -14,6 +14,7 @@ import * as jotai from "jotai";
 import { memo, useEffect, useMemo, useRef, useState } from "react";
 
 const TermAgentCodeBlockMaxWidth = jotai.atom(720);
+const TermAgentInlineDiffMaxBytes = 200_000;
 
 export type TermAgentModel = {
     blockId: string;
@@ -75,12 +76,23 @@ const TermAgentInlineDiff = memo(
         const isNewFile = original === "" || original == null;
         const noChanges = original === modified;
         const label = filename ? filename.replace(/^.*\//, "") : "Diff preview";
+        const tooLarge =
+            (original?.length ?? 0) > TermAgentInlineDiffMaxBytes ||
+            (modified?.length ?? 0) > TermAgentInlineDiffMaxBytes;
 
         const hunks = useMemo(() => {
-            if (noChanges || isNewFile) return null;
+            if (noChanges || isNewFile || tooLarge) return null;
             const patch = Diff.structuredPatch("a", "b", original ?? "", modified ?? "", "", "", { context: 3 });
             return patch.hunks;
-        }, [original, modified, noChanges, isNewFile]);
+        }, [original, modified, noChanges, isNewFile, tooLarge]);
+
+        if (tooLarge) {
+            return (
+                <div className="mt-2 rounded border border-zinc-800 px-3 py-1.5 text-xs text-zinc-500">
+                    {label}: file too large to diff inline ({Math.max(original?.length ?? 0, modified?.length ?? 0)} bytes)
+                </div>
+            );
+        }
 
         if (noChanges) {
             return <div className="mt-2 rounded border border-zinc-800 px-3 py-1.5 text-xs text-zinc-500">No changes</div>;
@@ -352,7 +364,9 @@ export const TermAgentChatProvider = memo(({ model }: { model: TermAgentModel })
         },
     });
 
-    model.registerTermAgentChat(sendMessage, setMessages, status, stop);
+    useEffect(() => {
+        model.registerTermAgentChat(sendMessage, setMessages, status, stop);
+    }, [model, sendMessage, setMessages, status, stop]);
 
     useEffect(() => {
         if ("syncAgentMessages" in model) {
@@ -385,12 +399,17 @@ export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
         scroller.scrollTop = scroller.scrollHeight;
     }, [messages, status, visible]);
 
+    const lastSeenPlanCallIdRef = useRef<string | null>(null);
     useEffect(() => {
         for (const msg of messages) {
             for (const part of msg.parts ?? []) {
-                if (part.type === "data-tooluse" && part.data?.toolname === "write_plan" && part.data?.status === "completed") {
-                    model.termAgentLastPlanPath = part.data.inputfilename ?? "plan";
-                }
+                if (part.type !== "data-tooluse") continue;
+                const data = part.data;
+                if (data?.toolname !== "write_plan" || data?.status !== "completed") continue;
+                const callId = data.toolcallid ?? `${msg.id}:${data.inputfilename ?? ""}`;
+                if (callId === lastSeenPlanCallIdRef.current) continue;
+                lastSeenPlanCallIdRef.current = callId;
+                model.termAgentLastPlanPath = data.inputfilename ?? "plan";
             }
         }
     }, [messages, model]);

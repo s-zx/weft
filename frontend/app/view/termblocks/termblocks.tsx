@@ -651,6 +651,7 @@ export class TermBlocksViewModel implements ViewModel {
         globalStore.set(this.termAgentChatId, crypto.randomUUID());
         globalStore.set(this.termAgentError, null);
         this.termAgentLastPlanPath = null;
+        this.termAgentModelOverride = null;
     }
 
     getAndClearTermAgentPlanPath(): string {
@@ -689,12 +690,30 @@ export class TermBlocksViewModel implements ViewModel {
                 globalStore.set(this.termAgentError, "No active worktree");
                 return;
             }
+            const force = sub === "discard";
             try {
-                await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
+                const resp = await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ action: "remove", cwd: globalStore.get(this.blockCwdAtom), path: this.worktreePath }),
+                    body: JSON.stringify({
+                        action: "remove",
+                        cwd: globalStore.get(this.blockCwdAtom),
+                        path: this.worktreePath,
+                        force,
+                    }),
                 });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    if (resp.status === 409) {
+                        globalStore.set(
+                            this.termAgentError,
+                            "Worktree has uncommitted changes — commit/push first, or run `:worktree discard` to throw them away."
+                        );
+                    } else {
+                        globalStore.set(this.termAgentError, `Failed to remove worktree: ${text}`);
+                    }
+                    return;
+                }
                 globalStore.set(this.termAgentError, `Worktree ${this.worktreeName} removed`);
                 this.worktreePath = null;
                 this.worktreeName = null;
@@ -1408,11 +1427,22 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
         return "";
     }, [value, history]);
 
-    const agentMode = value.startsWith(":");
+    const agentMode = value.startsWith(":") && !value.startsWith("::");
 
     const submit = () => {
         const line = value;
         if (line.length === 0) {
+            return;
+        }
+        if (line.startsWith("::")) {
+            // `::` escapes the agent prefix so the user can run a real command
+            // whose first character is `:` (e.g. `:` or `:5`).
+            const realLine = line.slice(1);
+            model.recordHistory(realLine);
+            historyIdxRef.current = -1;
+            draftRef.current = "";
+            setValue("");
+            model.submitInput(realLine);
             return;
         }
         if (line.startsWith(":")) {

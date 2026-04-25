@@ -131,6 +131,22 @@ func (cs *ChatStore) CompactMessages(chatId string, keepFirst, keepLast int) int
 	return removed
 }
 
+func (cs *ChatStore) PopLastMessages(chatId string, count int) int {
+	cs.lock.Lock()
+	defer cs.lock.Unlock()
+
+	chat := cs.chats[chatId]
+	if chat == nil || count <= 0 {
+		return 0
+	}
+	total := len(chat.NativeMessages)
+	if count > total {
+		count = total
+	}
+	chat.NativeMessages = chat.NativeMessages[:total-count]
+	return count
+}
+
 func (cs *ChatStore) RemoveMessage(chatId string, messageId string) bool {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()

@@ -526,7 +526,7 @@ export class TermBlocksViewModel implements ViewModel {
     }
 
     buildTermAgentContext(): { cwd?: string; connection?: string; last_command?: string } {
-        const cwd = globalStore.get(this.blockCwdAtom);
+        const cwd = this.worktreePath ?? globalStore.get(this.blockCwdAtom);
         const blocks = globalStore.get(this.blocksAtom);
         const lastDone = [...blocks].reverse().find((b) => b.state === "done");
         return {
@@ -546,6 +546,16 @@ export class TermBlocksViewModel implements ViewModel {
         }
         if (userInput.toLowerCase() === "new") {
             this.clearTermAgentSession();
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (userInput.toLowerCase() === "undo") {
+            this.undoLastTurn();
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (userInput.startsWith("worktree")) {
+            this.handleWorktreeCommand(userInput);
             this.closeTermAgentComposer();
             return;
         }
@@ -666,6 +676,71 @@ export class TermBlocksViewModel implements ViewModel {
         this.termAgentLastPlanPath = null;
         this.termAgentSendMessage({ parts: [{ type: "text", text: "go" }] });
     }
+
+    worktreePath: string | null = null;
+    worktreeName: string | null = null;
+
+    async handleWorktreeCommand(input: string) {
+        const parts = input.split(/\s+/);
+        const sub = parts[1] ?? "";
+
+        if (sub === "exit" || sub === "remove" || sub === "discard") {
+            if (!this.worktreePath) {
+                globalStore.set(this.termAgentError, "No active worktree");
+                return;
+            }
+            try {
+                await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ action: "remove", cwd: globalStore.get(this.blockCwdAtom), path: this.worktreePath }),
+                });
+                globalStore.set(this.termAgentError, `Worktree ${this.worktreeName} removed`);
+                this.worktreePath = null;
+                this.worktreeName = null;
+            } catch (e) {
+                globalStore.set(this.termAgentError, `Failed to remove worktree: ${e}`);
+            }
+            return;
+        }
+
+        const name = sub || undefined;
+        const cwd = globalStore.get(this.blockCwdAtom);
+        try {
+            const resp = await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "create", cwd, name }),
+            });
+            if (!resp.ok) {
+                const text = await resp.text();
+                globalStore.set(this.termAgentError, `Worktree failed: ${text}`);
+                return;
+            }
+            const data = await resp.json();
+            this.worktreePath = data.path;
+            this.worktreeName = data.name;
+            globalStore.set(this.termAgentError, `Worktree created: ${data.name} (branch ${data.branch})`);
+        } catch (e) {
+            globalStore.set(this.termAgentError, `Worktree failed: ${e}`);
+        }
+    }
+
+    undoLastTurn() {
+        if (!this.termAgentSetMessages) return;
+        this.termAgentSetMessages((msgs) => {
+            if (msgs.length < 2) return [];
+            return msgs.slice(0, -2);
+        });
+        const chatId = globalStore.get(this.termAgentChatId);
+        fetch(`${getWebServerEndpoint()}/api/agent-undo`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ chatid: chatId, count: 4 }),
+        }).catch(() => {});
+        globalStore.set(this.termAgentError, "Last turn undone");
+    }
+
 }
 
 // countVisibleLines strips ANSI escapes (CSI + OSC) from bytes, splits on

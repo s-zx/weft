@@ -454,6 +454,8 @@ func RunWebServer(listener net.Listener) {
 	gr.PathPrefix("/wave/stream-file/").HandlerFunc(WebFnWrap(WebFnOpts{AllowCaching: true}, handleStreamFile))
 	gr.HandleFunc("/api/post-chat-message", WebFnWrap(WebFnOpts{AllowCaching: false}, aiusechat.WaveAIPostMessageHandler))
 	gr.HandleFunc("/api/post-agent-message", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.PostAgentMessageHandler))
+	gr.HandleFunc("/api/agent-undo", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.AgentUndoHandler))
+	gr.HandleFunc("/api/agent-worktree", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.AgentWorktreeHandler))
 
 	// Non-streaming /wave/ routes get timeout protection
 	waveRouter := mux.NewRouter()

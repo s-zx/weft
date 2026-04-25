@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/s-zx/crest/pkg/aiusechat"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/secretstore"
 	"github.com/s-zx/crest/pkg/waveobj"
@@ -102,6 +103,90 @@ func buildAIOptsFromSettings() (*uctypes.AIOptsType, error) {
 		Verbosity:     uctypes.VerbosityLevelMedium,
 		Capabilities:  []string{uctypes.AICapabilityTools},
 	}, nil
+}
+
+func AgentWorktreeHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		Action string `json:"action"`
+		Cwd    string `json:"cwd"`
+		Name   string `json:"name,omitempty"`
+		Path   string `json:"path,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	switch req.Action {
+	case "create":
+		wt, err := MakeWorktree(req.Cwd, req.Name)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{
+			"name":   wt.Name,
+			"path":   wt.Path,
+			"branch": wt.BranchName,
+		})
+
+	case "remove":
+		if req.Path == "" {
+			http.Error(w, "path required for remove", http.StatusBadRequest)
+			return
+		}
+		wt := &Worktree{Path: req.Path, RepoRoot: req.Cwd}
+		if err := wt.Remove(); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]string{"status": "removed"})
+
+	case "status":
+		if req.Path == "" {
+			http.Error(w, "path required for status", http.StatusBadRequest)
+			return
+		}
+		wt := &Worktree{Path: req.Path}
+		json.NewEncoder(w).Encode(map[string]any{
+			"has_changes": wt.HasChanges(),
+		})
+
+	default:
+		http.Error(w, fmt.Sprintf("unknown action: %s (valid: create, remove, status)", req.Action), http.StatusBadRequest)
+	}
+}
+
+func AgentUndoHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req struct {
+		ChatID string `json:"chatid"`
+		Count  int    `json:"count"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid body", http.StatusBadRequest)
+		return
+	}
+	if req.ChatID == "" {
+		http.Error(w, "chatid required", http.StatusBadRequest)
+		return
+	}
+	if req.Count <= 0 {
+		req.Count = 2
+	}
+	chatId := AgentChatStorePrefix + req.ChatID
+	removed := chatstore.DefaultChatStore.PopLastMessages(chatId, req.Count)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"removed": removed})
 }
 
 // PostAgentMessageHandler is the HTTP entrypoint for the native agent.

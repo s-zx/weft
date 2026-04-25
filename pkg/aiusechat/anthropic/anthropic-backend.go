@@ -192,8 +192,15 @@ type anthropicWebSearchTool struct {
 }
 
 type anthropicCacheControl struct {
-	Type string `json:"type"` // "ephemeral"
-	TTL  string `json:"ttl"`  // "5m" or "1h"
+	Type string `json:"type"`          // "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "5m" or "1h"
+}
+
+type anthropicCachedToolDef struct {
+	Name         string                `json:"name"`
+	Description  string                `json:"description"`
+	InputSchema  map[string]any        `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicMessageObj struct {

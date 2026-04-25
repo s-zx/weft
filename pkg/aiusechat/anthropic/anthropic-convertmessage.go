@@ -109,7 +109,6 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 		Messages:  convertedMsgs,
 	}
 
-	// Add system prompt if provided
 	if len(chatOpts.SystemPrompt) > 0 {
 		systemBlocks := make([]anthropicMessageContentBlock, len(chatOpts.SystemPrompt))
 		for i, prompt := range chatOpts.SystemPrompt {
@@ -118,6 +117,7 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 				Text: prompt,
 			}
 		}
+		systemBlocks[len(systemBlocks)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 		reqBody.System = systemBlocks
 	}
 
@@ -131,6 +131,18 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 	}
 	if chatOpts.AllowNativeWebSearch {
 		reqBody.Tools = append(reqBody.Tools, &anthropicWebSearchTool{Type: "web_search_20250305", Name: "web_search"})
+	}
+	if len(reqBody.Tools) > 0 {
+		last := reqBody.Tools[len(reqBody.Tools)-1]
+		switch t := last.(type) {
+		case *uctypes.ToolDefinition:
+			reqBody.Tools[len(reqBody.Tools)-1] = &anthropicCachedToolDef{
+				Name:         t.Name,
+				Description:  t.Description,
+				InputSchema:  t.InputSchema,
+				CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+			}
+		}
 	}
 
 	// Enable extended thinking based on level

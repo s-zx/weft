@@ -298,6 +298,16 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 		updateToolUseDataInChat(backend, chatOpts, toolCall.ID, *toolCall.ToolUseData)
 	}
 
+	var fileChanged, fileBackup string
+	var fileIsNew bool
+	if toolCall.ToolUseData != nil && !isError {
+		fileChanged = toolCall.ToolUseData.InputFileName
+		fileBackup = toolCall.ToolUseData.WriteBackupFileName
+		if fileChanged != "" && fileBackup == "" {
+			fileIsNew = true
+		}
+	}
+
 	return uctypes.ToolCallOutcome{
 		Result: result,
 		Audit: uctypes.ToolAuditEvent{
@@ -313,10 +323,13 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 		},
 		IsError:     isError,
 		ToolLogName: toolLogName,
+		FileChanged: fileChanged,
+		FileBackup:  fileBackup,
+		FileIsNew:   fileIsNew,
 	}
 }
 
-func applyOutcome(metrics *uctypes.AIMetrics, outcome uctypes.ToolCallOutcome) {
+func applyOutcome(metrics *uctypes.AIMetrics, outcome uctypes.ToolCallOutcome, chatOpts uctypes.WaveChatOpts) {
 	if outcome.IsError {
 		metrics.ToolUseErrorCount++
 	}
@@ -324,6 +337,9 @@ func applyOutcome(metrics *uctypes.AIMetrics, outcome uctypes.ToolCallOutcome) {
 		metrics.ToolDetail[outcome.ToolLogName]++
 	}
 	metrics.AuditLog = append(metrics.AuditLog, outcome.Audit)
+	if outcome.FileChanged != "" && chatOpts.FileChangeCallback != nil {
+		chatOpts.FileChangeCallback(outcome.FileChanged, outcome.FileBackup, outcome.FileIsNew)
+	}
 }
 
 func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopReason, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh, metrics *uctypes.AIMetrics) {
@@ -376,7 +392,7 @@ func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopRea
 		wg.Wait()
 		for _, outcome := range outcomes {
 			toolResults = append(toolResults, outcome.Result)
-			applyOutcome(metrics, outcome)
+			applyOutcome(metrics, outcome, chatOpts)
 		}
 	} else {
 		for _, toolCall := range stopReason.ToolCalls {
@@ -386,7 +402,7 @@ func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopRea
 			}
 			outcome := processToolCall(backend, toolCall, chatOpts, sseHandler)
 			toolResults = append(toolResults, outcome.Result)
-			applyOutcome(metrics, outcome)
+			applyOutcome(metrics, outcome, chatOpts)
 		}
 	}
 

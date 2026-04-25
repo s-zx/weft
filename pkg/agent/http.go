@@ -13,7 +13,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/s-zx/crest/pkg/aiusechat"
-	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/secretstore"
 	"github.com/s-zx/crest/pkg/waveobj"
@@ -163,14 +162,14 @@ func AgentWorktreeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func AgentUndoHandler(w http.ResponseWriter, r *http.Request) {
+func AgentRewindHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var req struct {
-		ChatID string `json:"chatid"`
-		Count  int    `json:"count"`
+		ChatID       string `json:"chatid"`
+		CheckpointID string `json:"checkpointid,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid body", http.StatusBadRequest)
@@ -180,13 +179,20 @@ func AgentUndoHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chatid required", http.StatusBadRequest)
 		return
 	}
-	if req.Count <= 0 {
-		req.Count = 2
-	}
 	chatId := AgentChatStorePrefix + req.ChatID
-	removed := chatstore.DefaultChatStore.PopLastMessages(chatId, req.Count)
+	var restored int
+	var err error
+	if req.CheckpointID != "" {
+		restored, err = DefaultCheckpointStore.RewindTo(chatId, req.CheckpointID)
+	} else {
+		restored, err = DefaultCheckpointStore.RewindLast(chatId)
+	}
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]int{"removed": removed})
+	json.NewEncoder(w).Encode(map[string]int{"restored": restored})
 }
 
 // PostAgentMessageHandler is the HTTP entrypoint for the native agent.

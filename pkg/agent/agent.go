@@ -64,9 +64,20 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 		MaxSteps:             DefaultMaxAgentSteps,
 		ContextBudget:        DefaultContextBudget,
 		MetricsCallback:      makeTrajectoryWriter(opts.Session.Cwd, opts.Session.ChatID),
+		FileChangeCallback:   makeFileChangeRecorder(AgentChatStorePrefix+opts.Session.ChatID, opts.UserMsg.MessageId),
 	}
 
 	return aiusechat.WaveAIPostMessageWrap(ctx, sseHandler, opts.UserMsg, chatOpts)
+}
+
+func makeFileChangeRecorder(chatId string, checkpointId string) func(string, string, bool) {
+	return func(path, backupPath string, isNew bool) {
+		DefaultCheckpointStore.RecordFileChange(chatId, checkpointId, FileChange{
+			Path:       path,
+			BackupPath: backupPath,
+			IsNew:      isNew,
+		})
+	}
 }
 
 func makeTrajectoryWriter(cwd string, chatID string) func(*uctypes.AIMetrics) {

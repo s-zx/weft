@@ -549,8 +549,8 @@ export class TermBlocksViewModel implements ViewModel {
             this.closeTermAgentComposer();
             return;
         }
-        if (userInput.toLowerCase() === "undo") {
-            this.undoLastTurn();
+        if (userInput.toLowerCase() === "rewind") {
+            this.rewindFiles();
             this.closeTermAgentComposer();
             return;
         }
@@ -726,19 +726,24 @@ export class TermBlocksViewModel implements ViewModel {
         }
     }
 
-    undoLastTurn() {
-        if (!this.termAgentSetMessages) return;
-        this.termAgentSetMessages((msgs) => {
-            if (msgs.length < 2) return [];
-            return msgs.slice(0, -2);
-        });
+    async rewindFiles() {
         const chatId = globalStore.get(this.termAgentChatId);
-        fetch(`${getWebServerEndpoint()}/api/agent-undo`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ chatid: chatId, count: 4 }),
-        }).catch(() => {});
-        globalStore.set(this.termAgentError, "Last turn undone");
+        try {
+            const resp = await fetch(`${getWebServerEndpoint()}/api/agent-rewind`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatid: chatId }),
+            });
+            if (!resp.ok) {
+                const text = await resp.text();
+                globalStore.set(this.termAgentError, `Rewind failed: ${text}`);
+                return;
+            }
+            const data = await resp.json();
+            globalStore.set(this.termAgentError, `Rewound: ${data.restored} file(s) restored`);
+        } catch (e) {
+            globalStore.set(this.termAgentError, `Rewind failed: ${e}`);
+        }
     }
 
 }

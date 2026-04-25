@@ -115,9 +115,12 @@ type ToolDefinition struct {
 
 type ToolCallOutcome struct {
 	Result     AIToolResult
-	Audit      ToolAuditEvent
-	IsError    bool
+	Audit       ToolAuditEvent
+	IsError     bool
 	ToolLogName string
+	FileChanged string
+	FileBackup  string
+	FileIsNew   bool
 }
 
 func (td *ToolDefinition) Clean() *ToolDefinition {
@@ -522,6 +525,7 @@ type WaveChatOpts struct {
 	MaxSteps             int
 	ContextBudget        int
 	MetricsCallback      func(*AIMetrics)
+	FileChangeCallback   func(path, backupPath string, isNew bool)
 
 	// ephemeral to the step
 	TabState       string

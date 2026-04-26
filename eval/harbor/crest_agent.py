@@ -167,6 +167,16 @@ class CrestAgent(BaseInstalledAgent):
         await self.exec_as_agent(environment, command=setup_cmd)
         await self.exec_as_agent(environment, command=agent_cmd)
 
+        task_dir = os.environ.get("HARBOR_TASK_DIR", "/home/agent")
+        snapshot_cmd = (
+            f"mkdir -p /logs/agent/workspace && "
+            f"find {task_dir} -maxdepth 3 -type f "
+            f"  -not -path '*/node_modules/*' -not -path '*/.git/*' -not -name '*.ckpt' -not -name '*.bin' "
+            f"  -size -100k "
+            f"  -exec cp --parents {{}} /logs/agent/workspace/ \\; 2>/dev/null || true"
+        )
+        await self.exec_as_agent(environment, command=snapshot_cmd)
+
     def populate_context_post_run(self, context: AgentContext) -> None:
         log_path = "/logs/agent/crest-agent.txt"
         if not os.path.exists(log_path):

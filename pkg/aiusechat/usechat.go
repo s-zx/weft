@@ -264,7 +264,7 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 
 func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh) uctypes.ToolCallOutcome {
 	inputJSON, _ := json.Marshal(toolCall.Input)
-	logutil.DevPrintf("TOOLUSE name=%s id=%s input=%s approval=%q\n", toolCall.Name, toolCall.ID, utilfn.TruncateString(string(inputJSON), 40), toolCall.ToolUseData.Approval)
+	logutil.DevPrintf("TOOLUSE name=%s id=%s input=%s approval=%q\n", toolCall.Name, toolCall.ID, utilfn.TruncateString(string(inputJSON), 500), toolCall.ToolUseData.Approval)
 
 	approval := ""
 	if toolCall.ToolUseData != nil {
@@ -281,7 +281,7 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 	if isError {
 		log.Printf("  error=%s\n", result.ErrorText)
 	} else {
-		log.Printf("  result=%s\n", utilfn.TruncateString(result.Text, 40))
+		log.Printf("  result=%s\n", utilfn.TruncateString(result.Text, 500))
 	}
 
 	toolLogName := ""
@@ -343,7 +343,7 @@ func applyOutcome(metrics *uctypes.AIMetrics, outcome uctypes.ToolCallOutcome, c
 	}
 }
 
-func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopReason, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh, metrics *uctypes.AIMetrics) {
+func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopReason, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh, metrics *uctypes.AIMetrics) []uctypes.AIToolResult {
 	// Create and send all data-tooluse packets at the beginning
 	for i := range stopReason.ToolCalls {
 		toolCall := &stopReason.ToolCalls[i]
@@ -472,6 +472,28 @@ func processAllToolCalls(backend UseChatBackend, stopReason *uctypes.WaveStopRea
 			}
 		}
 	}
+	return filteredResults
+}
+
+func extractCmdName(input any) string {
+	m, ok := input.(map[string]any)
+	if !ok {
+		return ""
+	}
+	cmd, ok := m["cmd"].(string)
+	if !ok || cmd == "" {
+		return ""
+	}
+	cmd = strings.TrimSpace(cmd)
+	fields := strings.Fields(cmd)
+	if len(fields) == 0 {
+		return ""
+	}
+	name := fields[0]
+	if idx := strings.LastIndex(name, "/"); idx >= 0 {
+		name = name[idx+1:]
+	}
+	return name
 }
 
 func detectDoomLoop(sigs []string, threshold int) bool {
@@ -515,6 +537,8 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 	stepBudgetWarned := false
 	doomLoopWarned := false
 	pendingTodosNudged := false
+	unavailableCmdsWarned := false
+	unavailableCmds := make(map[string]bool)
 	var lastInputTokens int
 	var cont *uctypes.WaveContinueResponse
 	var recentToolSigs []string
@@ -608,7 +632,26 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 		firstStep = false
 		if stopReason != nil && stopReason.Kind == uctypes.StopKindToolUse {
 			metrics.ToolUseCount += len(stopReason.ToolCalls)
-			processAllToolCalls(backend, stopReason, chatOpts, sseHandler, metrics)
+			toolResults := processAllToolCalls(backend, stopReason, chatOpts, sseHandler, metrics)
+			for i, tc := range stopReason.ToolCalls {
+				if tc.Name == "shell_exec" && i < len(toolResults) {
+					if strings.Contains(toolResults[i].Text, `"exit_code":127`) {
+						if cmdName := extractCmdName(tc.Input); cmdName != "" {
+							unavailableCmds[cmdName] = true
+						}
+					}
+				}
+			}
+			if len(unavailableCmds) > 0 && !unavailableCmdsWarned {
+				unavailableCmdsWarned = true
+				cmds := make([]string, 0, len(unavailableCmds))
+				for c := range unavailableCmds {
+					cmds = append(cmds, c)
+				}
+				chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
+					fmt.Sprintf("ENVIRONMENT NOTE: The following commands are NOT available: %s. Do not retry them — use alternative approaches.", strings.Join(cmds, ", ")))
+				log.Printf("unavailable commands detected: %v\n", cmds)
+			}
 			for _, tc := range stopReason.ToolCalls {
 				inputJSON, _ := json.Marshal(tc.Input)
 				sig := tc.Name + ":" + utilfn.TruncateString(string(inputJSON), 200)

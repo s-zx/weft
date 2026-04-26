@@ -19,6 +19,7 @@ Usage:
 
 import json
 import os
+import secrets
 import shlex
 import uuid
 
@@ -29,8 +30,7 @@ from harbor.models.agent.context import AgentContext
 CREST_REPO = "https://github.com/s-zx/crest.git"
 CREST_BRANCH = "feat/native-agent"
 
-WAVESRV_PORT = 1819
-AGENT_ENDPOINT = f"http://localhost:{WAVESRV_PORT}/api/post-agent-message"
+AGENT_API_PATH = "/api/post-agent-message"
 
 
 class CrestAgent(BaseInstalledAgent):
@@ -81,8 +81,12 @@ class CrestAgent(BaseInstalledAgent):
         api_type = os.environ.get("CREST_API_TYPE", "openai-chat")
         base_url = os.environ.get("CREST_BASE_URL", "")
 
+        auth_key = secrets.token_hex(32)
         env_vars = {
             "WAVETERM_DEV": "1",
+            "WAVETERM_AUTH_KEY": auth_key,
+            "WAVETERM_CONFIG_HOME": "/home/agent/.config/waveterm",
+            "WAVETERM_DATA_HOME": "/home/agent/.local/share/waveterm",
         }
         env_export = " ".join(f"{k}={shlex.quote(v)}" for k, v in env_vars.items())
 
@@ -112,18 +116,37 @@ class CrestAgent(BaseInstalledAgent):
         })
 
         setup_cmd = (
-            f"mkdir -p ~/.config/waveterm && "
-            f"echo {shlex.quote(settings_json)} > ~/.config/waveterm/settings.json"
+            f"mkdir -p /home/agent/.config/waveterm /home/agent/.local/share/waveterm && "
+            f"echo {shlex.quote(settings_json)} > /home/agent/.config/waveterm/settings.json"
         )
 
         agent_cmd = (
-            f"{env_export} wavesrv &"
-            f" WAVESRV_PID=$! && "
-            f"sleep 2 && "
-            f"curl -s -N -X POST {AGENT_ENDPOINT} "
+            f"mkdir -p /logs/agent && "
+            f"tail -f /dev/null | {env_export} wavesrv > /logs/agent/wavesrv.log 2>&1 & "
+            f"WAVESRV_PID=$! && "
+            f"echo 'wavesrv started pid='$WAVESRV_PID && "
+            f"WEB_ADDR='' && "
+            f"for i in $(seq 1 30); do "
+            f"  ESTART=$(grep 'WAVESRV-ESTART' /logs/agent/wavesrv.log 2>/dev/null || true); "
+            f"  if [ -n \"$ESTART\" ]; then "
+            f"    WEB_ADDR=$(echo \"$ESTART\" | sed -n 's/.*web:\\([^ ]*\\).*/\\1/p'); "
+            f"    break; "
+            f"  fi; "
+            f"  sleep 1; "
+            f"done && "
+            f"if [ -z \"$WEB_ADDR\" ]; then "
+            f"  echo 'ERROR: wavesrv failed to start'; "
+            f"  cat /logs/agent/wavesrv.log; "
+            f"  kill $WAVESRV_PID 2>/dev/null || true; "
+            f"  exit 1; "
+            f"fi && "
+            f"echo 'wavesrv web at '$WEB_ADDR && "
+            f"curl -s -N -X POST http://$WEB_ADDR{AGENT_API_PATH} "
             f"-H 'Content-Type: application/json' "
+            f"-H 'X-AuthKey: {auth_key}' "
             f"-d {shlex.quote(request_body)} "
-            f"| tee /logs/agent/crest-agent.txt && "
+            f"2>/logs/agent/curl-stderr.txt "
+            f"| tee /logs/agent/crest-agent.txt; "
             f"kill $WAVESRV_PID 2>/dev/null || true"
         )
 

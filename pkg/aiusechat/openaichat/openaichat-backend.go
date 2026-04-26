@@ -21,6 +21,7 @@ import (
 	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wavebase"
 	"github.com/s-zx/crest/pkg/web/sse"
 )
 
@@ -166,7 +167,19 @@ func processChatStream(
 			continue
 		}
 
+		if wavebase.IsDevMode() && len(chunk.Choices) > 0 {
+			c := chunk.Choices[0]
+			log.Printf("openaichat: chunk content=%q reasoning=%q toolcalls=%d finish=%v\n",
+				utilfn.TruncateString(c.Delta.Content, 50),
+				utilfn.TruncateString(c.Delta.Reasoning, 50),
+				len(c.Delta.ToolCalls),
+				c.FinishReason)
+		}
+
 		if len(chunk.Choices) == 0 {
+			if wavebase.IsDevMode() {
+				log.Printf("openaichat: chunk with 0 choices: %s\n", utilfn.TruncateString(data, 200))
+			}
 			continue
 		}
 

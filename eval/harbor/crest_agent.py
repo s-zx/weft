@@ -118,7 +118,7 @@ class CrestAgent(BaseInstalledAgent):
             "chatid": chat_id,
             "tabid": "eval-tab",
             "blockid": "eval-block",
-            "mode": "do",
+            "mode": "bench",
             "aimode": "",
             "msg": {
                 "messageid": message_id,

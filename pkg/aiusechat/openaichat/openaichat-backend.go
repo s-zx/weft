@@ -74,6 +74,10 @@ func RunChatStep(
 	}
 	defer resp.Body.Close()
 
+	if wavebase.IsDevMode() {
+		log.Printf("openaichat: response status=%d content-type=%q transfer-encoding=%q\n",
+			resp.StatusCode, resp.Header.Get("Content-Type"), resp.Header.Get("Transfer-Encoding"))
+	}
 	if resp.StatusCode != http.StatusOK {
 		bodyBytes, _ := io.ReadAll(resp.Body)
 		return nil, nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))

@@ -126,8 +126,13 @@ func buildChatHTTPRequest(ctx context.Context, messages []ChatRequestMessage, ch
 		}
 	}
 
+	endpoint := opts.Endpoint
+	if !strings.HasSuffix(endpoint, "/chat/completions") {
+		endpoint = strings.TrimRight(endpoint, "/") + "/chat/completions"
+	}
+
 	if wavebase.IsDevMode() {
-		log.Printf("openaichat: model %s, messages: %d, tools: %d\n", opts.Model, len(messages), len(allTools))
+		log.Printf("openaichat: model %s, messages: %d, tools: %d, endpoint: %s\n", opts.Model, len(messages), len(allTools), endpoint)
 	}
 
 	buf, err := json.Marshal(reqBody)
@@ -135,7 +140,7 @@ func buildChatHTTPRequest(ctx context.Context, messages []ChatRequestMessage, ch
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.Endpoint, bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}

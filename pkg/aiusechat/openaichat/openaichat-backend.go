@@ -192,13 +192,17 @@ func processChatStream(
 		}
 
 		choice := chunk.Choices[0]
-		if choice.Delta.Reasoning != "" {
+		reasoning := choice.Delta.Reasoning
+		if reasoning == "" {
+			reasoning = choice.Delta.ReasoningContent
+		}
+		if reasoning != "" {
 			if !reasoningStarted {
 				_ = sseHandler.AiMsgReasoningStart(reasoningID)
 				reasoningStarted = true
 			}
-			reasoningBuilder.WriteString(choice.Delta.Reasoning)
-			_ = sseHandler.AiMsgReasoningDelta(reasoningID, choice.Delta.Reasoning)
+			reasoningBuilder.WriteString(reasoning)
+			_ = sseHandler.AiMsgReasoningDelta(reasoningID, reasoning)
 		}
 		if choice.Delta.Content != "" {
 			if !textStarted {
@@ -242,7 +246,7 @@ func processChatStream(
 	if reasoningStarted {
 		_ = sseHandler.AiMsgReasoningEnd(reasoningID)
 	}
-	if textBuilder.Len() == 0 && reasoningBuilder.Len() > 0 && len(toolCallsInProgress) == 0 {
+	if textBuilder.Len() == 0 && reasoningBuilder.Len() > 0 {
 		text := reasoningBuilder.String()
 		if !textStarted {
 			_ = sseHandler.AiMsgTextStart(textID)

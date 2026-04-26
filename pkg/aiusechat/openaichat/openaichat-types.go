@@ -192,10 +192,11 @@ type StreamChoice struct {
 }
 
 type ContentDelta struct {
-	Role      string          `json:"role,omitempty"`
-	Content   string          `json:"content,omitempty"`
-	Reasoning string          `json:"reasoning,omitempty"`
-	ToolCalls []ToolCallDelta `json:"tool_calls,omitempty"`
+	Role             string          `json:"role,omitempty"`
+	Content          string          `json:"content,omitempty"`
+	Reasoning        string          `json:"reasoning,omitempty"`
+	ReasoningContent string          `json:"reasoning_content,omitempty"`
+	ToolCalls        []ToolCallDelta `json:"tool_calls,omitempty"`
 }
 
 type ToolCallDelta struct {

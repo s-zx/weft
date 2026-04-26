@@ -537,8 +537,10 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 	stepBudgetWarned := false
 	doomLoopWarned := false
 	pendingTodosNudged := false
-	unavailableCmdsWarned := false
+	unavailableCmdsLastCount := 0
 	unavailableCmds := make(map[string]bool)
+	hasProducedOutput := false
+	outputNudged := false
 	var lastInputTokens int
 	var cont *uctypes.WaveContinueResponse
 	var recentToolSigs []string
@@ -573,6 +575,12 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 					fmt.Sprintf("IMPORTANT: You have %d steps remaining out of %d total. Begin wrapping up your current task.", remaining, chatOpts.MaxSteps))
 				stepBudgetWarned = true
 			}
+		}
+		if chatOpts.MaxSteps > 0 && !hasProducedOutput && !outputNudged && metrics.RequestCount > chatOpts.MaxSteps*2/5 {
+			outputNudged = true
+			chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
+				fmt.Sprintf("URGENT: You have used %d of %d steps without writing any output files. Stop researching and start building your solution NOW. Use write_text_file to create your initial implementation immediately.", metrics.RequestCount, chatOpts.MaxSteps))
+			log.Printf("output nudge: %d steps without file writes\n", metrics.RequestCount)
 		}
 		stopReason, rtnMessages, err := runAIChatStep(ctx, sseHandler, backend, chatOpts, cont)
 		metrics.RequestCount++
@@ -642,8 +650,8 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 					}
 				}
 			}
-			if len(unavailableCmds) > 0 && !unavailableCmdsWarned {
-				unavailableCmdsWarned = true
+			if len(unavailableCmds) > unavailableCmdsLastCount {
+				unavailableCmdsLastCount = len(unavailableCmds)
 				cmds := make([]string, 0, len(unavailableCmds))
 				for c := range unavailableCmds {
 					cmds = append(cmds, c)
@@ -651,6 +659,12 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 				chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
 					fmt.Sprintf("ENVIRONMENT NOTE: The following commands are NOT available: %s. Do not retry them — use alternative approaches.", strings.Join(cmds, ", ")))
 				log.Printf("unavailable commands detected: %v\n", cmds)
+			}
+			for _, tc := range stopReason.ToolCalls {
+				if tc.Name == "write_text_file" || tc.Name == "edit_text_file" || tc.Name == "multi_edit" {
+					hasProducedOutput = true
+					break
+				}
 			}
 			for _, tc := range stopReason.ToolCalls {
 				inputJSON, _ := json.Marshal(tc.Input)

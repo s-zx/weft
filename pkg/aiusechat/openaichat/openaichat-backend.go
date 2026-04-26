@@ -20,6 +20,7 @@ import (
 	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
 	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 	"github.com/s-zx/crest/pkg/web/sse"
 )
 
@@ -125,7 +126,7 @@ func processChatStream(
 
 		event, err := decoder.Decode()
 		if err != nil {
-			if errors.Is(err, io.EOF) {
+			if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 				break
 			}
 			if sseHandler.Err() != nil {
@@ -136,6 +137,10 @@ func processChatStream(
 					ErrorText: "client disconnected",
 				}, partialMsg, nil
 			}
+			if textBuilder.Len() > 0 || len(toolCallsInProgress) > 0 {
+				log.Printf("openaichat: stream ended with error after receiving data: %v\n", err)
+				break
+			}
 			_ = sseHandler.AiMsgError(err.Error())
 			return &uctypes.WaveStopReason{
 				Kind:      uctypes.StopKindError,
@@ -144,14 +149,17 @@ func processChatStream(
 			}, nil, fmt.Errorf("stream decode error: %w", err)
 		}
 
-		data := event.Data()
-		if data == "[DONE]" {
-			break
+		data := strings.TrimSpace(event.Data())
+		if data == "[DONE]" || data == "" {
+			if data == "[DONE]" {
+				break
+			}
+			continue
 		}
 
 		var chunk StreamChunk
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			log.Printf("openaichat: failed to parse chunk: %v\n", err)
+			log.Printf("openaichat: failed to parse chunk: %v (data=%s)\n", err, utilfn.TruncateString(data, 100))
 			continue
 		}
 

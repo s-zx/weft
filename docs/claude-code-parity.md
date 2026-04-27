@@ -114,7 +114,9 @@ questions resolved; ready to implement.
   "trust me" — separate from `bench`. Both auto-approve, but only
   `bypassPermissions` keeps bypass-immune safety checks; `bench`
   skips them so eval harnesses can do destructive things in
-  sandboxes. Both freely selectable, no gating flag.
+  sandboxes. **`bench` is hidden from the user-facing mode picker**
+  (Harbor / API-only) so a casual user can't trip into it. No gating
+  flag — picking a visible mode is the consent.
 - Bypass-immune safety checks: `.git/`, `.ssh/`, `.env`, `rm -rf /`,
   `curl|sh`, `sudo`, etc. force a prompt in `bypassPermissions`.
 - Approval prompt default "save to" = `session` (least commitment).
@@ -197,7 +199,7 @@ beyond positional strings.
 | 2026-04-27 | spawn_task returns final assistant text via `ConvertAIChatToUIChat` | Avoids needing a new method on the Backend interface |
 | 2026-04-27 | Context collapse via opt-in `ToolResultCollapsible` interface, not a Backend method | Same pattern as `MessageDependsOnPrev`; only the message types that carry tool results need to opt in, no new method on the Backend interface |
 | 2026-04-27 | Heavy-summary file list pulled from `metrics.AuditLog`, not chatstore-tracked | Audit log already exists; threading it into chatstore would need an interface change for marginal benefit |
-| 2026-04-27 | Permissions v2 — `bench` mode IS the bypass mode | Avoids inventing a fifth mode; existing semantics already match Claude's `bypassPermissions` |
+| 2026-04-27 | Permissions v2 — `bench` and `bypassPermissions` are distinct modes | They look similar (auto-approve) but serve different audiences. Bench has *no* safety checks (eval harness can do whatever); bypass keeps bypass-immune ones (interactive "trust me"). Bench hidden from user picker so a casual user can't trip into a no-safety mode. |
 | 2026-04-27 | Permissions v2 — rules in standalone `pkg/agent/permissions` package | Clean cycle story; engine reusable beyond the agent loop |
 | 2026-04-27 | Permissions v2 — defer classifier to v2 | Rules-first ships value sooner; classifier needs prompt design + gating |
 

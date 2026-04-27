@@ -213,24 +213,26 @@ Concretely:
 - **Rules** override either way. A `deny` rule beats a permissive
   mode; an `allow` rule beats a restrictive mode.
 
-Modes map as follows — `bench` stays unchanged (it's used by Harbor /
-TB2 harnesses), and a new `bypassPermissions` mode joins the user-facing
-set:
+Modes map as follows. `bench` is hidden from the user-facing picker
+(eval-harness only); the four user-visible modes are
+`ask` / `plan` / `do` / `bypassPermissions`:
 
-| Mode | Tools | Default on no-match | Safety checks | Audience |
-|---|---|---|---|---|
-| `ask` | read-only set | allow (reads are safe) | n/a | interactive read-only |
-| `plan` | read-only + write_plan | allow for reads, deny mutating tools at tool-side | enforced | interactive planning |
-| `do` | full mutation set | ask | enforced | interactive coding (default) |
-| `bypassPermissions` | full mutation set | allow | enforced (bypass-immune list still fires) | "trust me" interactive |
-| `bench` | bench set | allow | **off** | non-interactive eval harnesses (Harbor/TB2) |
+| Mode | Tools | Default on no-match | Safety checks | Visible | Audience |
+|---|---|---|---|---|---|
+| `ask` | read-only set | allow (reads are safe) | n/a | yes | interactive read-only |
+| `plan` | read-only + write_plan | allow for reads, deny mutating tools at tool-side | enforced | yes | interactive planning |
+| `do` | full mutation set | ask | enforced | yes | interactive coding (default) |
+| `bypassPermissions` | full mutation set | allow | enforced (bypass-immune list still fires) | yes | "trust me" interactive |
+| `bench` | bench set | allow | **off** | **no** (API-only) | non-interactive eval harnesses (Harbor/TB2) |
 
-Five modes total. Both `bypassPermissions` and `bench` auto-approve;
-the difference is whether bypass-immune safety checks (`.git/`, `.ssh/`,
-`rm -rf /`, etc.) force a prompt. Bench has to skip them so eval
-tasks can do destructive things in their test sandbox without
-prompting; bypass keeps them so a real user typing `:bypass` doesn't
-accidentally lose their `.git` directory.
+Five modes total in the backend; four shown to users. Both
+`bypassPermissions` and `bench` auto-approve; the difference is
+whether bypass-immune safety checks (`.git/`, `.ssh/`, `rm -rf /`,
+etc.) force a prompt. `bench` skips them so eval tasks can do
+destructive things in their test sandbox without prompting (a prompt
+in headless eval = timeout = effective deny, which would hang the
+eval). `bypassPermissions` keeps them so a real user picking it from
+the mode picker doesn't accidentally lose their `.git` directory.
 
 ### 3.4 UI surface
 
@@ -287,22 +289,36 @@ follow-up. The session-prompt-with-suggestions covers 80% of UX.)
 
 **Decision:** Yes, as a new mode `bypassPermissions` (Claude's name).
 **Distinct from `bench`** — they look similar but serve different
-purposes and we keep both.
+purposes. Both modes exist server-side; only `bypassPermissions` is
+exposed in the user-facing mode picker.
 
-| Mode | Audience | Safety checks | Used by |
-|---|---|---|---|
-| `bench` | Automated test harnesses (Harbor / TB2) | **all checks off** — pure auto-approve. Needs to allow `rm -rf` in test dirs, `sudo` in containers, etc. without prompting. | `eval/harbor/crest_agent.py` |
-| `bypassPermissions` | Interactive user saying "I trust the agent" | bypass-immune safety checks **still fire** (`.git`/`.ssh`/`.env`/`rm -rf /`/`curl|sh`/etc. force a prompt) | `:bypass` overlay command |
+| Mode | Audience | Safety checks | Visible to users? | Used by |
+|---|---|---|---|---|
+| `bench` | Automated eval harnesses (Harbor / TB2) | **all checks off** — pure auto-approve. Needs to allow `rm -rf` in test dirs, `sudo` in containers, `.env` file edits in env-config tasks, etc. without prompting. | **No** — hidden from mode picker | `eval/harbor/crest_agent.py` (POSTs `mode: "bench"` to `/api/post-agent-message`) |
+| `bypassPermissions` | Interactive user saying "I trust the agent" | bypass-immune safety checks **still fire** (`.git`/`.ssh`/`.env`/`rm -rf /`/`curl|sh`/`sudo` force a prompt) | Yes — picker / `:bypass` prefix | overlay |
 
-The original draft conflated these because both auto-approve. They're
-actually different: bench needs to be **fully** unguarded so eval
-tasks can do whatever the task author wrote; bypass is a user-facing
-"YOLO with a seatbelt" — auto-approves the 99% of safe things while
-still blocking the catastrophic ones.
+**Why not just drop `bench` and route eval through `bypassPermissions`?**
+Bypass-immune means "force a prompt." In headless eval (no user to
+click), a prompt times out → effective deny. Real TB2 tasks legitimately
+edit `.env` files, run install scripts, manipulate `.git`. Routing
+those through `bypassPermissions` would hang the eval. We need a
+no-checks mode for that audience; `bench` is it.
+
+**Why hide `bench` from users?** It's a footgun. A user picking
+`bench` thinking it's "yolo" gets *more* than they bargained for —
+no safety net at all. `bypassPermissions` is the right user-facing
+"trust me" mode; `bench` is a harness-only escape hatch. Keeping it
+out of the picker means a casual user can't trip into it.
+
+**Implementation:** the mode picker UI lists `["ask", "plan", "do",
+"bypassPermissions"]`. `bench` exists in the backend's
+`LookupMode` registry and is accepted from `/api/post-agent-message`
+(so Harbor keeps working with no adapter changes), but no UI affordance
+selects it. No server-side block — Crest is single-tenant and Harbor
+needs to set it; relying on UX gating is sufficient.
 
 **No gating flag.** `bypassPermissions` is selectable like any other
-mode. Users invoke it explicitly via the mode picker or a `:bypass`
-prefix; the act of choosing it is the consent.
+mode. The act of choosing it is the consent.
 
 **Bypass-immune list** (only applies to `bypassPermissions`, not `bench`):
 
@@ -618,6 +634,7 @@ Estimated: 2 sittings to step 6 (functional parity with mode behavior
 | Skip classifier for v1 | Matches user's "ship rules first" call; classifier is a separate >1 sitting lift involving prompt design + Statsig-equivalent gating |
 | `bypassPermissions` is a new mode separate from `bench` | They look similar (both auto-approve) but the audiences and safety posture differ — bench for non-interactive evals (no checks at all, can do `rm -rf` in test sandboxes); bypass for interactive "trust me" (still blocks `rm -rf /`, `.git`, `.ssh`, etc.). Resolved 2026-04-27 per user direction |
 | No `bypassEnabled` gating flag | Picking the mode IS the consent; gating adds friction without safety value when the destructive paths are already bypass-immune. Resolved 2026-04-27 |
+| `bench` mode hidden from user-facing mode picker (API-only) | A user picking `bench` from a picker would unwittingly disable safety. Harbor/eval is the only legitimate audience and they POST `mode: "bench"` directly. Frontend lists `[ask, plan, do, bypassPermissions]`; bench remains accepted by the backend. Resolved 2026-04-27 per user direction |
 | Rules in a top-level `pkg/agent/permissions` package | Cleaner cycle story; reusable beyond the agent loop |
 | `PermissionAdapter` lives on `ToolDefinition` (uctypes) | Keeps the engine pure; avoids `permissions → tools → permissions` cycle |
 | In-binary defaults shipped (Allow git-status etc.) | Most users never customize anything; sane defaults set the floor |

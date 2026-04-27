@@ -43,6 +43,27 @@ func (cs *ChatStore) Get(chatId string) *uctypes.AIChat {
 	return copyChat
 }
 
+// GetForLLM returns the chat with transcript-only messages filtered out —
+// any message implementing LLMVisibleProvider with LLMVisible()==false is
+// dropped from NativeMessages. Use this at the LLM-serialization boundary
+// (backend RunChatStep) when transcript-only message types are in play.
+//
+// Today no built-in message type returns false from LLMVisible(), so the
+// output is identical to Get(). The helper exists so future transcript-only
+// types (subagent transcripts, denial notes, branch markers) can be added
+// without backend changes — they go in the chatstore via PostMessage and
+// are filtered out here.
+func (cs *ChatStore) GetForLLM(chatId string) *uctypes.AIChat {
+	chat := cs.Get(chatId)
+	if chat == nil {
+		return nil
+	}
+	// Get already returned a copy with its own NativeMessages slice,
+	// so reassigning here doesn't touch the store's state.
+	chat.NativeMessages = uctypes.FilterLLMVisible(chat.NativeMessages)
+	return chat
+}
+
 func (cs *ChatStore) Delete(chatId string) {
 	cs.lock.Lock()
 	defer cs.lock.Unlock()

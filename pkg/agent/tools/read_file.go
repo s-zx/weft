@@ -20,9 +20,9 @@ import (
 )
 
 // ReadTextFile wraps pkg/aiusechat.GetReadTextFileToolDefinition with an
-// agent-scoped approval callback and telemetry log name. After a successful
-// read it records the file's mtime+size so the matching write/edit tools can
-// detect external modifications between the agent's read and its write.
+// agent-scoped approval callback and telemetry log name. The MtimeRecordHook
+// fires after a successful read so the matching write/edit tools can detect
+// external modifications between the agent's read and its write.
 func ReadTextFile(chatId string, approval func(any) string) uctypes.ToolDefinition {
 	t := aiusechat.GetReadTextFileToolDefinition()
 	t.ToolLogName = "agent:read_text_file"
@@ -33,31 +33,7 @@ func ReadTextFile(chatId string, approval func(any) string) uctypes.ToolDefiniti
 - By default reads up to 2000 lines. When you already know the section you need, use the "offset" and "limit" parameters — don't read the whole file.
 - Don't re-read a file you just edited. The Edit/Write tool would have errored if the change failed; the new content is what you wrote.
 - Reading is parallel-safe — issue multiple read_text_file calls in a single response when you need to inspect several files.`
-
-	// Wrap the inner callback so we can record a successful read for the
-	// stale-edit detector. The original may use either ToolTextCallback or
-	// ToolAnyCallback — wrap whichever is set.
-	if inner := t.ToolTextCallback; inner != nil {
-		t.ToolTextCallback = func(input any) (string, error) {
-			out, err := inner(input)
-			if err == nil {
-				if p := extractFilenameFromInput(input); p != "" {
-					recordFileRead(chatId, p)
-				}
-			}
-			return out, err
-		}
-	} else if inner := t.ToolAnyCallback; inner != nil {
-		t.ToolAnyCallback = func(input any, td *uctypes.UIMessageDataToolUse) (any, error) {
-			out, err := inner(input, td)
-			if err == nil {
-				if p := extractFilenameFromInput(input); p != "" {
-					recordFileRead(chatId, p)
-				}
-			}
-			return out, err
-		}
-	}
+	t.AfterHooks = []uctypes.AfterToolHook{MtimeRecordHook(chatId)}
 	return t
 }
 

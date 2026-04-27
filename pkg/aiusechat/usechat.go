@@ -148,6 +148,149 @@ func runAIChatStep(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend Us
 	return stopReason, messages, err
 }
 
+// emitAgentEvent fires an AgentEvent to every sink registered on
+// chatOpts.EventSinks. Synchronous; sinks are responsible for not blocking.
+// No-op if there are no sinks (the common case today). Stamps Timestamp and
+// ChatId so callers don't have to.
+func emitAgentEvent(ctx context.Context, chatOpts *uctypes.WaveChatOpts, ev uctypes.AgentEvent) {
+	if chatOpts == nil || len(chatOpts.EventSinks) == 0 {
+		return
+	}
+	if ev.Timestamp == 0 {
+		ev.Timestamp = time.Now().UnixMilli()
+	}
+	if ev.ChatId == "" {
+		ev.ChatId = chatOpts.ChatId
+	}
+	for _, sink := range chatOpts.EventSinks {
+		sink(ctx, ev)
+	}
+}
+
+
+// String returns the event-bus form of a LoopAction. AgentEvent.Action
+// is a string field (uctypes can't import aiusechat for circular-dep
+// reasons), so subscribers consume this serialization.
+func (a LoopAction) String() string {
+	switch a {
+	case LoopActionFinish:
+		return "finish"
+	case LoopActionContinueWithTools:
+		return "continue_with_tools"
+	case LoopActionEscalateMaxTokens:
+		return "escalate_max_tokens"
+	case LoopActionResumeAfterMaxTokens:
+		return "resume_after_max_tokens"
+	case LoopActionReactiveCompact:
+		return "reactive_compact"
+	case LoopActionFailFirstStep:
+		return "fail_first_step"
+	case LoopActionFailFatal:
+		return "fail_fatal"
+	case LoopActionFailMaxTokens:
+		return "fail_max_tokens"
+	default:
+		return "unknown"
+	}
+}
+
+// LoopAction is the verdict returned by classifyTerminalState. Each action
+// names exactly one branch of RunAIChat's outer loop. The classifier is
+// pure: it inspects (stopReason, err, counters) and returns an Action;
+// side effects (counter mutation, SSE emission, system-prompt nudges,
+// chatstore writes) are the dispatcher's job. Pi calls this "errors are
+// data, not control flow."
+type LoopAction int
+
+const (
+	LoopActionUnknown LoopAction = iota
+	// LoopActionFinish: step completed cleanly. Run post-step bookkeeping
+	// (post messages, compaction tiers, pending-todos nudge), then break.
+	LoopActionFinish
+	// LoopActionContinueWithTools: stopReason carries tool calls. Run them,
+	// set cont, and loop.
+	LoopActionContinueWithTools
+	// LoopActionEscalateMaxTokens: model hit max-output-tokens cap; this is
+	// the first such hit and the cap is small enough to double. Bump
+	// chatOpts.Config.MaxTokens, set cont, and loop.
+	LoopActionEscalateMaxTokens
+	// LoopActionResumeAfterMaxTokens: subsequent max-tokens hit (or cap was
+	// already large). Append a "resume directly" system note, set cont, loop.
+	// Capped at 3 attempts.
+	LoopActionResumeAfterMaxTokens
+	// LoopActionReactiveCompact: provider rejected the request because the
+	// context exceeded its window. One-shot fallback: aggressively compact
+	// and retry the same step. Skips post-step bookkeeping.
+	LoopActionReactiveCompact
+	// LoopActionFailFirstStep: step errored on the very first turn — surface
+	// it as the function's error return so the caller knows the chat never
+	// got off the ground. Skips post-step bookkeeping.
+	LoopActionFailFirstStep
+	// LoopActionFailFatal: non-recoverable error mid-conversation. Surface
+	// via SSE and break. Skips post-step bookkeeping (rtnMessages may be nil
+	// or partial; we don't risk posting them).
+	LoopActionFailFatal
+	// LoopActionFailMaxTokens: max-tokens loop gave up after escalation +
+	// resume attempts. Post the partial output (different from FailFatal),
+	// then surface a max-tokens-specific error and break.
+	LoopActionFailMaxTokens
+)
+
+// loopCounters captures the per-turn state classifyTerminalState needs to
+// pick the right Action. Kept as a value type so the classifier is pure.
+type loopCounters struct {
+	firstStep                bool
+	maxTokensEscalated       bool
+	maxTokensResumeAttempts  int
+	reactiveCompactAttempted bool
+	contextBudget            int
+	currentMaxTokens         int
+}
+
+// classifyTerminalState maps the outcome of one runAIChatStep call onto a
+// LoopAction. It is pure — no logging, no SSE, no counter mutation.
+//
+// Decision order:
+//  1. err != nil takes precedence over stopReason. A context-length error
+//     gets one shot at reactive compaction; everything else fails (first
+//     step → returned err, otherwise fatal SSE).
+//  2. nil stopReason without err is treated as a clean finish. (Backends
+//     don't return this today, but it's the safest default.)
+//  3. StopKindToolUse → ContinueWithTools.
+//  4. StopKindMaxTokens → escalate cap, then resume up to 3x, then give up.
+//  5. Everything else (StopKindError, Canceled, RateLimit, Content,
+//     PauseTurn, StepBudget, Done) → Finish. Backends already emit
+//     AiMsgError on the StopKindError path, so the loop just lets the
+//     pending-todos nudge run and breaks.
+func classifyTerminalState(stopReason *uctypes.WaveStopReason, err error, c loopCounters) LoopAction {
+	if err != nil {
+		if isContextLengthError(err) && !c.reactiveCompactAttempted && c.contextBudget > 0 {
+			return LoopActionReactiveCompact
+		}
+		if c.firstStep {
+			return LoopActionFailFirstStep
+		}
+		return LoopActionFailFatal
+	}
+	if stopReason == nil {
+		return LoopActionFinish
+	}
+	switch stopReason.Kind {
+	case uctypes.StopKindToolUse:
+		return LoopActionContinueWithTools
+	case uctypes.StopKindMaxTokens:
+		if !c.maxTokensEscalated && c.currentMaxTokens < 32768 {
+			return LoopActionEscalateMaxTokens
+		}
+		if c.maxTokensResumeAttempts < 3 {
+			return LoopActionResumeAfterMaxTokens
+		}
+		return LoopActionFailMaxTokens
+	default:
+		return LoopActionFinish
+	}
+}
+
 func getUsage(msgs []uctypes.GenAIMessage) uctypes.AIUsage {
 	var rtn uctypes.AIUsage
 	var found bool
@@ -180,12 +323,36 @@ func updateToolUseDataInChat(backend UseChatBackend, chatOpts uctypes.WaveChatOp
 }
 
 func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCall, chatOpts uctypes.WaveChatOpts, toolDef *uctypes.ToolDefinition, sseHandler *sse.SSEHandlerCh) uctypes.AIToolResult {
+	hookCtx := uctypes.HookContext{
+		ToolCall: toolCall,
+		ToolDef:  toolDef,
+		ChatOpts: &chatOpts,
+	}
+	bgCtx := sseHandler.Context()
+
+	// finalize is the single tail every return path goes through. It runs
+	// per-tool then global AfterHooks so classification + reflection-suffix
+	// + spill apply uniformly to validation errors, approval denials, and
+	// happy-path results alike. Before this refactor, only ResolveToolCall
+	// errors got the suffix; the early-return paths bypassed it.
+	finalize := func(result uctypes.AIToolResult) uctypes.AIToolResult {
+		if toolDef != nil {
+			for _, hook := range toolDef.AfterHooks {
+				hook(bgCtx, hookCtx, &result)
+			}
+		}
+		for _, hook := range chatOpts.AfterToolHooks {
+			hook(bgCtx, hookCtx, &result)
+		}
+		return result
+	}
+
 	if toolCall.ToolUseData == nil {
-		return uctypes.AIToolResult{
+		return finalize(uctypes.AIToolResult{
 			ToolName:  toolCall.Name,
 			ToolUseID: toolCall.ID,
 			ErrorText: "Invalid Tool Call",
-		}
+		})
 	}
 
 	if toolCall.ToolUseData.Status == uctypes.ToolUseStatusError {
@@ -193,11 +360,11 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 		if errorMsg == "" {
 			errorMsg = "Unspecified Tool Error"
 		}
-		return uctypes.AIToolResult{
+		return finalize(uctypes.AIToolResult{
 			ToolName:  toolCall.Name,
 			ToolUseID: toolCall.ID,
 			ErrorText: errorMsg,
-		}
+		})
 	}
 
 	if toolDef != nil && toolDef.ToolVerifyInput != nil {
@@ -205,11 +372,11 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 			errorMsg := fmt.Sprintf("Input validation failed: %v", err)
 			toolCall.ToolUseData.Status = uctypes.ToolUseStatusError
 			toolCall.ToolUseData.ErrorMessage = errorMsg
-			return uctypes.AIToolResult{
+			return finalize(uctypes.AIToolResult{
 				ToolName:  toolCall.Name,
 				ToolUseID: toolCall.ID,
 				ErrorText: errorMsg,
-			}
+			})
 		}
 		// ToolVerifyInput can modify the toolusedata.  re-send it here.
 		_ = sseHandler.AiMsgData("data-tooluse", toolCall.ID, *toolCall.ToolUseData)
@@ -236,11 +403,11 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 			}
 			toolCall.ToolUseData.Status = uctypes.ToolUseStatusError
 			toolCall.ToolUseData.ErrorMessage = errorMsg
-			return uctypes.AIToolResult{
+			return finalize(uctypes.AIToolResult{
 				ToolName:  toolCall.Name,
 				ToolUseID: toolCall.ID,
 				ErrorText: errorMsg,
-			}
+			})
 		}
 
 		// this still happens here because we need to update the FE to say the tool call was approved
@@ -249,20 +416,47 @@ func processToolCallInternal(backend UseChatBackend, toolCall uctypes.WaveToolCa
 	}
 
 	toolCall.ToolUseData.RunTs = time.Now().UnixMilli()
-	result := ResolveToolCall(toolDef, toolCall, chatOpts)
 
+	// BeforeHooks: per-tool first (close to the tool's contract — e.g. mtime
+	// check on file writers), then global (loop-level concerns — none today,
+	// but Permissions v2 will land here). Any non-nil return short-circuits
+	// execution with that result; finalize() still runs AfterHooks so
+	// classification + reflection-suffix apply uniformly.
+	var result uctypes.AIToolResult
+	shortCircuited := false
+	if toolDef != nil {
+		for _, hook := range toolDef.BeforeHooks {
+			if r := hook(bgCtx, hookCtx); r != nil {
+				result = *r
+				shortCircuited = true
+				break
+			}
+		}
+	}
+	if !shortCircuited {
+		for _, hook := range chatOpts.BeforeToolHooks {
+			if r := hook(bgCtx, hookCtx); r != nil {
+				result = *r
+				shortCircuited = true
+				break
+			}
+		}
+	}
+	if !shortCircuited {
+		result = ResolveToolCall(toolDef, toolCall, chatOpts)
+	}
+
+	// Update toolUseData status from the (un-suffixed) result — AfterHooks
+	// may mutate result.ErrorText (reflection suffix), but the UI should
+	// show the original error message.
 	if result.ErrorText != "" {
 		toolCall.ToolUseData.Status = uctypes.ToolUseStatusError
 		toolCall.ToolUseData.ErrorMessage = result.ErrorText
-		if result.ErrorType == "" {
-			result.ErrorType = classifyToolError(result.ErrorText)
-		}
-		result.ErrorText = result.ErrorText + "\n\n[Reflection required] Before retrying, identify exactly what went wrong and why. Try a different approach or different arguments rather than repeating the same call."
 	} else {
 		toolCall.ToolUseData.Status = uctypes.ToolUseStatusCompleted
 	}
 
-	return result
+	return finalize(result)
 }
 
 func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chatOpts uctypes.WaveChatOpts, sseHandler *sse.SSEHandlerCh) uctypes.ToolCallOutcome {
@@ -275,18 +469,18 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 	}
 	startTs := time.Now()
 
+	emitAgentEvent(sseHandler.Context(), &chatOpts, uctypes.AgentEvent{
+		Kind:       uctypes.AgentEventKindToolStart,
+		ToolCallId: toolCall.ID,
+		ToolName:   toolCall.Name,
+		Args:       toolCall.Input,
+	})
+
 	toolDef := chatOpts.GetToolDefinition(toolCall.Name)
 	result := processToolCallInternal(backend, toolCall, chatOpts, toolDef, sseHandler)
-
-	if result.ErrorText == "" {
-		spillToolResultIfOversized(&result, toolDef, chatOpts.ChatId)
-	} else if result.ErrorType == "" {
-		// Belt-and-suspenders: processToolCallInternal classifies for the
-		// happy-path (resolve→error annotate) but its early-return branches
-		// (invalid call, denied approval, validation failure) bypass that.
-		// Catch them here so every error has an ErrorType in telemetry.
-		result.ErrorType = classifyToolError(result.ErrorText)
-	}
+	// Spill / classify / reflection-suffix now run as built-in AfterToolHooks
+	// installed by RunAIChat, so processToolCallInternal already returns a
+	// fully-finalized result here.
 
 	durationMs := time.Since(startTs).Milliseconds()
 
@@ -321,6 +515,15 @@ func processToolCall(backend UseChatBackend, toolCall uctypes.WaveToolCall, chat
 			fileIsNew = true
 		}
 	}
+
+	emitAgentEvent(sseHandler.Context(), &chatOpts, uctypes.AgentEvent{
+		Kind:       uctypes.AgentEventKindToolEnd,
+		ToolCallId: toolCall.ID,
+		ToolName:   toolCall.Name,
+		Result:     &result,
+		IsError:    isError,
+		ErrorType:  result.ErrorType,
+	})
 
 	return uctypes.ToolCallOutcome{
 		Result: result,
@@ -599,7 +802,8 @@ func classifyToolError(errText string) string {
 		return uctypes.ErrorTypeCanceled
 	case strings.Contains(low, "modified externally since you last read"):
 		return uctypes.ErrorTypeStaleFile
-	case strings.Contains(low, "permission denied"),
+	case strings.HasPrefix(low, "denied:"),
+		strings.Contains(low, "permission denied"),
 		strings.Contains(low, "access denied"),
 		strings.Contains(low, "operation not permitted"),
 		strings.Contains(low, "not authorized"):
@@ -663,6 +867,10 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 	}
 	defer activeChats.Delete(chatOpts.ChatId)
 
+	installBuiltinHooks(&chatOpts)
+
+	emitAgentEvent(ctx, &chatOpts, uctypes.AgentEvent{Kind: uctypes.AgentEventKindAgentStart})
+
 	stepNum := chatstore.DefaultChatStore.CountUserMessages(chatOpts.ChatId)
 	aiProvider := chatOpts.Config.Provider
 	if aiProvider == "" {
@@ -683,6 +891,15 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 		AIProvider:    aiProvider,
 		IsLocal:       isLocal,
 	}
+	defer func() {
+		// AgentEnd fires on every exit (normal completion, FailFirstStep
+		// early return, panic propagation). Closure captures the metrics
+		// pointer so subscribers see the final accumulated state.
+		emitAgentEvent(ctx, &chatOpts, uctypes.AgentEvent{
+			Kind:    uctypes.AgentEventKindAgentEnd,
+			Metrics: metrics,
+		})
+	}()
 	firstStep := true
 	stepBudgetWarned := false
 	doomLoopWarned := false
@@ -697,7 +914,12 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 	var lastInputTokens int
 	var cont *uctypes.WaveContinueResponse
 	var recentToolSigs []string
+stepLoop:
 	for {
+		emitAgentEvent(ctx, &chatOpts, uctypes.AgentEvent{
+			Kind:    uctypes.AgentEventKindTurnStart,
+			StepNum: metrics.RequestCount,
+		})
 		if chatOpts.TabStateGenerator != nil {
 			tabState, tabTools, tabId, tabErr := chatOpts.TabStateGenerator()
 			if tabErr == nil {
@@ -756,10 +978,30 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 				metrics.Usage.Model = "mixed"
 			}
 		}
-		if err != nil && isContextLengthError(err) && !reactiveCompactAttempted && chatOpts.ContextBudget > 0 {
+		action := classifyTerminalState(stopReason, err, loopCounters{
+			firstStep:                firstStep,
+			maxTokensEscalated:       maxTokensEscalated,
+			maxTokensResumeAttempts:  maxTokensResumeAttempts,
+			reactiveCompactAttempted: reactiveCompactAttempted,
+			contextBudget:            chatOpts.ContextBudget,
+			currentMaxTokens:         chatOpts.Config.MaxTokens,
+		})
+
+		emitAgentEvent(ctx, &chatOpts, uctypes.AgentEvent{
+			Kind:       uctypes.AgentEventKindTurnEnd,
+			StepNum:    metrics.RequestCount,
+			StopReason: stopReason,
+			Action:     action.String(),
+		})
+
+		// Early-out dispatch: actions that bypass post-step bookkeeping
+		// (post messages, compaction tiers, firstStep flag flip).
+		switch action {
+		case LoopActionReactiveCompact:
 			// Last-ditch recovery: provider rejected the request because the
 			// context exceeded its window. Aggressively summarize and retry once.
-			// Single-shot — if the retry also blows up we surface the error.
+			// Single-shot — if the retry also blows up the next classify() call
+			// will return FailFatal because reactiveCompactAttempted is set.
 			reactiveCompactAttempted = true
 			summary, removed := chatstore.DefaultChatStore.CompactMessagesWithSummary(chatOpts.ChatId, 1, 5)
 			log.Printf("reactive compact on context-length error: removed=%d, error=%v\n", removed, err)
@@ -774,18 +1016,28 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 						_ = chatstore.DefaultChatStore.PostMessage(chatOpts.ChatId, &chatOpts.Config, nativeMsg)
 					}
 				}
-				continue
+				continue stepLoop
 			}
-		}
-		if firstStep && err != nil {
-			metrics.HadError = true
-			return metrics, fmt.Errorf("failed to stream %s chat: %w", chatOpts.Config.APIType, err)
-		}
-		if err != nil {
+			// removed==0 means we had nothing left to compact. Fall through
+			// to the same fail path the classifier would have picked if
+			// reactive compact wasn't an option (FailFirstStep on the first
+			// turn so the caller sees a wrapped error, otherwise FailFatal).
+			if firstStep {
+				metrics.HadError = true
+				return metrics, fmt.Errorf("failed to stream %s chat: %w", chatOpts.Config.APIType, err)
+			}
 			metrics.HadError = true
 			_ = sseHandler.AiMsgError(err.Error())
 			_ = sseHandler.AiMsgFinish("", nil)
-			break
+			break stepLoop
+		case LoopActionFailFirstStep:
+			metrics.HadError = true
+			return metrics, fmt.Errorf("failed to stream %s chat: %w", chatOpts.Config.APIType, err)
+		case LoopActionFailFatal:
+			metrics.HadError = true
+			_ = sseHandler.AiMsgError(err.Error())
+			_ = sseHandler.AiMsgFinish("", nil)
+			break stepLoop
 		}
 		for _, msg := range rtnMessages {
 			if msg != nil {
@@ -841,7 +1093,13 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 			}
 		}
 		firstStep = false
-		if stopReason != nil && stopReason.Kind == uctypes.StopKindToolUse {
+
+		// Continue-path dispatch: actions that follow a successful step.
+		// Each case either continues the loop (with cont set) or breaks
+		// stepLoop. The Finish case falls through to the pending-todos
+		// nudge before breaking.
+		switch action {
+		case LoopActionContinueWithTools:
 			metrics.ToolUseCount += len(stopReason.ToolCalls)
 			toolResults := processAllToolCalls(backend, stopReason, chatOpts, sseHandler, metrics)
 			for i, tc := range stopReason.ToolCalls {
@@ -892,58 +1150,61 @@ func RunAIChat(ctx context.Context, sseHandler *sse.SSEHandlerCh, backend UseCha
 				Model:            chatOpts.Config.Model,
 				ContinueFromKind: uctypes.StopKindToolUse,
 			}
-			continue
-		}
-		if stopReason != nil && stopReason.Kind == uctypes.StopKindMaxTokens {
+			continue stepLoop
+
+		case LoopActionEscalateMaxTokens:
 			// Reasoning models (Gemini 3.x, GPT-5, Claude w/ thinking) routinely
 			// blow through small max_tokens budgets on extended thinking. First
-			// hit: silently double the cap. Subsequent hits: tell the model to
-			// resume directly, up to 3 attempts. After that, surface the error.
-			if !maxTokensEscalated && chatOpts.Config.MaxTokens < 32768 {
-				newMax := chatOpts.Config.MaxTokens * 2
-				if newMax > 65536 {
-					newMax = 65536
-				}
-				if newMax <= chatOpts.Config.MaxTokens {
-					newMax = 32768
-				}
-				log.Printf("max_tokens hit: escalating %d -> %d\n", chatOpts.Config.MaxTokens, newMax)
-				chatOpts.Config.MaxTokens = newMax
-				maxTokensEscalated = true
-				cont = &uctypes.WaveContinueResponse{
-					Model:            chatOpts.Config.Model,
-					ContinueFromKind: uctypes.StopKindMaxTokens,
-				}
-				continue
+			// hit: silently double the cap (capped at 64K).
+			newMax := chatOpts.Config.MaxTokens * 2
+			if newMax > 65536 {
+				newMax = 65536
 			}
-			if maxTokensResumeAttempts < 3 {
-				maxTokensResumeAttempts++
-				log.Printf("max_tokens hit: resume attempt %d/3\n", maxTokensResumeAttempts)
-				chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
-					"Output token limit hit. Resume directly from where you stopped — no apology, no recap, just continue.")
-				cont = &uctypes.WaveContinueResponse{
-					Model:            chatOpts.Config.Model,
-					ContinueFromKind: uctypes.StopKindMaxTokens,
-				}
-				continue
+			if newMax <= chatOpts.Config.MaxTokens {
+				newMax = 32768
 			}
+			log.Printf("max_tokens hit: escalating %d -> %d\n", chatOpts.Config.MaxTokens, newMax)
+			chatOpts.Config.MaxTokens = newMax
+			maxTokensEscalated = true
+			cont = &uctypes.WaveContinueResponse{
+				Model:            chatOpts.Config.Model,
+				ContinueFromKind: uctypes.StopKindMaxTokens,
+			}
+			continue stepLoop
+
+		case LoopActionResumeAfterMaxTokens:
+			// Subsequent max-tokens hits — tell the model to resume directly,
+			// up to 3 attempts. classifyTerminalState enforces the cap.
+			maxTokensResumeAttempts++
+			log.Printf("max_tokens hit: resume attempt %d/3\n", maxTokensResumeAttempts)
+			chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
+				"Output token limit hit. Resume directly from where you stopped — no apology, no recap, just continue.")
+			cont = &uctypes.WaveContinueResponse{
+				Model:            chatOpts.Config.Model,
+				ContinueFromKind: uctypes.StopKindMaxTokens,
+			}
+			continue stepLoop
+
+		case LoopActionFailMaxTokens:
 			log.Printf("max_tokens hit: giving up after %d resume attempts\n", maxTokensResumeAttempts)
 			_ = sseHandler.AiMsgError("Output token limit hit repeatedly — model could not finish. Try a smaller request or raise ai:maxtokens.")
 			_ = sseHandler.AiMsgFinish("max_tokens", nil)
 			metrics.HadError = true
-			break
-		}
-		if chatOpts.PendingTodosCheck != nil && chatOpts.PendingTodosCheck() && !pendingTodosNudged {
-			pendingTodosNudged = true
-			chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
-				"You have pending todo items that are not yet completed. Do not stop — continue working on the remaining items. Use `todo_read` to review your progress.")
-			cont = &uctypes.WaveContinueResponse{
-				Model:            chatOpts.Config.Model,
-				ContinueFromKind: uctypes.StopKindToolUse,
+			break stepLoop
+
+		case LoopActionFinish:
+			if chatOpts.PendingTodosCheck != nil && chatOpts.PendingTodosCheck() && !pendingTodosNudged {
+				pendingTodosNudged = true
+				chatOpts.SystemPrompt = append(chatOpts.SystemPrompt,
+					"You have pending todo items that are not yet completed. Do not stop — continue working on the remaining items. Use `todo_read` to review your progress.")
+				cont = &uctypes.WaveContinueResponse{
+					Model:            chatOpts.Config.Model,
+					ContinueFromKind: uctypes.StopKindToolUse,
+				}
+				continue stepLoop
 			}
-			continue
+			break stepLoop
 		}
-		break
 	}
 	return metrics, nil
 }

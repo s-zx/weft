@@ -133,6 +133,13 @@ type ToolDefinition struct {
 	ToolApproval     func(any) string                              `json:"-"`
 	ToolVerifyInput  func(any, *UIMessageDataToolUse) error        `json:"-"` // *UIMessageDataToolUse will NOT be nil
 	ToolProgressDesc func(any) ([]string, error)                   `json:"-"`
+
+	// Per-tool hooks. BeforeHooks run after approval but before the callback;
+	// any non-nil return short-circuits execution with that result. AfterHooks
+	// mutate the result in place after the callback. Per-tool hooks run before
+	// the global hooks registered on WaveChatOpts.
+	BeforeHooks []BeforeToolHook `json:"-"`
+	AfterHooks  []AfterToolHook  `json:"-"`
 }
 
 type ToolCallOutcome struct {
@@ -398,6 +405,58 @@ type ToolResultCollapsible interface {
 	CollapseToolResults(placeholder string) (collapsed int)
 }
 
+// LLMVisibleProvider is implemented by transcript-only messages that should
+// live in the chatstore (visible to /tree, audit, UI) but should NOT be
+// included in the message list sent to the LLM. Messages that don't
+// implement this interface are LLM-visible by default — the existing
+// per-backend native message types (anthropic, openai-chat, gemini,
+// openai-responses) carry actual provider content and stay visible.
+//
+// Implementations return false to mark themselves transcript-only. There
+// is no method to "selectively visible" — a message is either a real
+// provider message that goes to the LLM or a transcript artifact that
+// stays local. Use cases:
+//
+//   - subagent transcript: parent agent records its child's full transcript
+//     for UI rendering, but the LLM only sees the final tool result text.
+//   - audit/notification rows: "user denied tool X" or "files changed
+//     externally" surfaced inline so /tree shows context, but the LLM
+//     gets the synthesized error result instead.
+//   - branch markers: in a future branching session model, "← branched
+//     here at step N" is transcript-only.
+//
+// For "compaction summary" message type, prefer LLMVisible() == true —
+// the summary IS meant for the model to see. This interface is for content
+// the model should never see.
+type LLMVisibleProvider interface {
+	LLMVisible() bool
+}
+
+// IsLLMVisibleMessage returns whether m should be included in the message
+// list sent to an LLM. Messages that don't implement LLMVisibleProvider
+// are treated as visible (the conservative default — historical Crest
+// behavior is "every native message goes to the model").
+func IsLLMVisibleMessage(m GenAIMessage) bool {
+	if v, ok := m.(LLMVisibleProvider); ok {
+		return v.LLMVisible()
+	}
+	return true
+}
+
+// FilterLLMVisible returns a new slice containing only the messages from
+// `msgs` that are LLM-visible. The input slice is not modified. Useful at
+// the LLM serialization boundary; the chatstore itself keeps the full
+// transcript including transcript-only messages.
+func FilterLLMVisible(msgs []GenAIMessage) []GenAIMessage {
+	out := make([]GenAIMessage, 0, len(msgs))
+	for _, m := range msgs {
+		if IsLLMVisibleMessage(m) {
+			out = append(out, m)
+		}
+	}
+	return out
+}
+
 const (
 	AIMessagePartTypeText = "text"
 	AIMessagePartTypeFile = "file"
@@ -576,6 +635,30 @@ func (m *UIMessage) GetContent() string {
 	return ""
 }
 
+// ApprovalDecision is what an ApprovalDecider returns. Three behaviors
+// match the engine's RuleAllow/RuleAsk/RuleDeny but are kept as
+// strings here so uctypes can stay unaware of the permissions package
+// (which would otherwise create a uctypes ↔ permissions cycle once
+// permissions imports uctypes for tool input shapes).
+//
+// `behavior` is "allow" | "ask" | "deny". `reason` is a short
+// human-readable explanation that the dispatcher writes into the
+// tool result on deny so the model can read why it was rejected.
+type ApprovalDecision struct {
+	Behavior string
+	Reason   string
+}
+
+// ApprovalDecider is the closure CreateToolUseData calls to decide
+// the per-call Approval state. Set by the agent runtime (in
+// pkg/agent) to a function that wraps the permissions Engine plus the
+// session's cwd/posture; uctypes itself stays free of policy logic.
+//
+// nil is fine — CreateToolUseData falls back to the tool's own
+// ToolApproval callback (the v1 mode-baked path) when no decider is
+// installed. This makes the field opt-in during the migration.
+type ApprovalDecider func(toolCall WaveToolCall) ApprovalDecision
+
 type WaveChatOpts struct {
 	ChatId               string
 	ClientId             string
@@ -594,6 +677,33 @@ type WaveChatOpts struct {
 	MetricsCallback      func(*AIMetrics)
 	FileChangeCallback   func(path, backupPath string, isNew bool)
 	PendingTodosCheck    func() bool
+
+	// Posture is the per-chat strictness signal threaded into
+	// ApprovalDecider. Empty string is treated as "default". Set by
+	// the agent runtime from the user's settings and the API
+	// `mode: "bench"` alias.
+	Posture string
+
+	// ApprovalDecider, when non-nil, takes precedence over the
+	// per-tool ToolApproval callback at CreateToolUseData time. The
+	// agent runtime installs this from a Permissions Engine; tests
+	// and legacy paths can leave it nil.
+	ApprovalDecider ApprovalDecider
+
+	// Global tool hooks. BeforeToolHooks run after per-tool BeforeHooks; any
+	// non-nil return short-circuits execution with that result. AfterToolHooks
+	// run after per-tool AfterHooks and mutate the result in place. Built-in
+	// hooks (spill, error classification, reflection suffix) are installed by
+	// RunAIChat at the top of the loop; callers can append additional hooks
+	// before invoking the loop.
+	BeforeToolHooks []BeforeToolHook
+	AfterToolHooks  []AfterToolHook
+
+	// EventSinks receive structured AgentEvent notifications at lifecycle
+	// points (agent start/end, turn start/end, tool start/end). Additive to
+	// existing SSE/audit; sinks are called synchronously, so expensive work
+	// must hand off to goroutines.
+	EventSinks []AgentEventSink
 
 	// ephemeral to the step
 	TabState       string

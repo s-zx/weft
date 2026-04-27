@@ -4,10 +4,13 @@
 package tools
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"sync"
 	"time"
+
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 // fileReadTracker remembers the last mtime+size we saw for each (chatId, path)
@@ -84,4 +87,47 @@ func recordFileRead(chatId, absPath string) {
 
 func checkFileUnchanged(chatId, absPath string) error {
 	return globalFileTracker.checkUnchanged(chatId, absPath)
+}
+
+// MtimeCheckHook returns a BeforeToolHook that refuses a write/edit when the
+// target file has been modified externally since the agent's last read.
+// Skips the check when the file does not yet exist (new-file write) and
+// when the input does not carry a "filename" field.
+func MtimeCheckHook(chatId string) uctypes.BeforeToolHook {
+	return func(_ context.Context, h uctypes.HookContext) *uctypes.AIToolResult {
+		p := extractFilenameFromInput(h.ToolCall.Input)
+		if p == "" {
+			return nil
+		}
+		if _, err := os.Stat(p); err != nil {
+			// New-file write — no prior read needed. The underlying tool
+			// handles its own "directory exists" / "is allowed" validation.
+			return nil
+		}
+		if err := checkFileUnchanged(chatId, p); err != nil {
+			return &uctypes.AIToolResult{
+				ToolName:  h.ToolCall.Name,
+				ToolUseID: h.ToolCall.ID,
+				ErrorText: err.Error(),
+				ErrorType: uctypes.ErrorTypeStaleFile,
+			}
+		}
+		return nil
+	}
+}
+
+// MtimeRecordHook returns an AfterToolHook that refreshes the recorded
+// mtime+size for the file the tool just operated on. Runs only on success
+// (skipped if the result already carries an error). Used by read (record
+// after successful read) and by write/edit (record after successful write
+// so the next edit sees the agent's own write as the latest known state).
+func MtimeRecordHook(chatId string) uctypes.AfterToolHook {
+	return func(_ context.Context, h uctypes.HookContext, result *uctypes.AIToolResult) {
+		if result == nil || result.ErrorText != "" {
+			return
+		}
+		if p := extractFilenameFromInput(h.ToolCall.Input); p != "" {
+			recordFileRead(chatId, p)
+		}
+	}
 }

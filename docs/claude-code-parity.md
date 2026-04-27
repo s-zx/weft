@@ -121,7 +121,12 @@ questions resolved; ready to implement.
     the agent overlay header. Bench mode implicitly forces a hidden
     `bench` posture that skips even bypass-immune safety checks.
   - Posture is per-chat state with `defaultPosture` setting for new
-    chats. Posture only affects calls the rule engine would otherwise
+    chats. **Bundled default is `acceptEdits`** (diverges from Claude
+    Code's `default` default — Crest's audience is personal
+    local-coding work where iterative edits dominate). Risk bounded
+    by file backups, mtime tracking, bypass-immune paths, deny rules,
+    and `shell_exec` still prompting.
+  - Posture only affects calls the rule engine would otherwise
     *ask* about — bypass-immune paths still prompt under any
     user-selectable posture.
 - Bypass-immune safety checks: `.git/`, `.ssh/`, `.env`, `rm -rf /`,
@@ -208,6 +213,7 @@ beyond positional strings.
 | 2026-04-27 | Heavy-summary file list pulled from `metrics.AuditLog`, not chatstore-tracked | Audit log already exists; threading it into chatstore would need an interface change for marginal benefit |
 | 2026-04-27 | Permissions v2 — `bench` and `bypassPermissions` are distinct modes | They look similar (auto-approve) but serve different audiences. Bench has *no* safety checks (eval harness can do whatever); bypass keeps bypass-immune ones (interactive "trust me"). Bench hidden from user picker so a casual user can't trip into a no-safety mode. |
 | 2026-04-27 | Permissions v2 — Mode and Posture are orthogonal axes | Conflating them (single picker with `ask`/`plan`/`do`/`bypassPermissions`) mixes work mode with permission strictness. Split: Mode = tools/prompt/budget; Posture = strictness. Posture set: `default` / `acceptEdits` / `bypassPermissions` + hidden `bench`, toggled via Shift+Tab. |
+| 2026-04-27 | Permissions v2 — bundled default posture is `acceptEdits` | Diverges from Claude Code's `default` default. Crest's audience is personal local-coding workflows; clicking through every edit approval is too cumbersome. Risk bounded by file backups, mtime tracking, bypass-immune paths still prompting, `shell_exec` still prompting, and deny rules still firing. |
 | 2026-04-27 | Permissions v2 — rules in standalone `pkg/agent/permissions` package | Clean cycle story; engine reusable beyond the agent loop |
 | 2026-04-27 | Permissions v2 — defer classifier to v2 | Rules-first ships value sooner; classifier needs prompt design + gating |
 

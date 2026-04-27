@@ -231,21 +231,51 @@ posts `mode: "bench"` unchanged — backward-compatible.
 
 #### Permission Postures (the strictness axis)
 
-| Posture | Behavior on calls the rules don't match | Bypass-immune safety checks | Default? | Audience |
+| Posture | Behavior on calls the rules don't match | Bypass-immune safety checks | New-chat default? | Audience |
 |---|---|---|---|---|
-| `default` | Fall back to mode default (`do` → ask, `ask` → allow, etc.) | n/a (rules-only) | **yes** | normal use — the agent asks before every mutation |
-| `acceptEdits` | Auto-allow **file-edit tools** (`edit_text_file`, `write_text_file`, `multi_edit`) when the target path is inside `cwd`. Everything else falls through to the `default` behavior. | **fire** (won't auto-allow edits to `.env`, `.git/`, `.ssh/`, etc.) | no | iterative file work — let the agent rewrite my code without clicking every diff, but keep shell prompts |
+| `default` | Fall back to mode default (`do` → ask, `ask` → allow, etc.) | n/a (rules-only) | no | the agent asks before every mutation — for cautious users or when working in unfamiliar repos |
+| `acceptEdits` | Auto-allow **file-edit tools** (`edit_text_file`, `write_text_file`, `multi_edit`) when the target path is inside `cwd`. Everything else falls through to the `default` behavior. | **fire** (won't auto-allow edits to `.env`, `.git/`, `.ssh/`, etc.) | **yes** | iterative file work — let the agent rewrite my code without clicking every diff, but keep shell prompts |
 | `bypassPermissions` | Auto-allow everything | **fire** (`.git/`, `.ssh/`, `.env`, `rm -rf /`, `curl|sh`, `sudo`) | no | "trust me" — let the agent run without clicking every prompt |
 | `bench` | Auto-allow everything | **off** | no — eval-only, not user-selectable | non-interactive eval; activated implicitly by `mode: "bench"` |
 
-Posture state lives **per-chat** in the session. Reset on every new
-chat to the user's `defaultPosture` setting (which itself defaults to
-`default`). The user flips it with `Shift+Tab` (cycles
-`default` → `acceptEdits` → `bypassPermissions` → `default`,
-matching Claude Code's cycle minus the `plan` step we already split
-out into the mode axis) or `/permission` (opens the chooser). The
-overlay status indicator displays the current posture so the user
-always knows what they're in.
+Posture state lives **per-chat** in the session. New chats start in
+the user's `defaultPosture` setting, which **ships set to
+`acceptEdits`** for new installs. The user flips per-chat with
+`Shift+Tab` (cycles `default` → `acceptEdits` →
+`bypassPermissions` → `default`, matching Claude Code's cycle minus
+the `plan` step we already split out into the mode axis) or
+`/permission` (opens the chooser, including a "set as default for
+new chats" checkbox).
+
+**Why `acceptEdits` is the bundled default — diverging from Claude
+Code's `default` default:** clicking through every `edit_text_file`
+during interactive coding is the #1 friction in current usage. The
+risk is bounded:
+
+- File edits get a `filebackup.MakeFileBackup` snapshot before write
+  (existing in `multi_edit.go` etc.) — clobber recovery is a
+  one-liner.
+- The new file mtime tracker (shipped in `0ce9f60b`) refuses edits
+  to files that changed externally since the agent's last read, so
+  the agent can't silently overwrite a user's concurrent change.
+- Bypass-immune paths (`.env`, `.git/`, `.ssh/`, `credentials*`)
+  still prompt — the catastrophic file edits still get a click-gate.
+- `shell_exec` (the truly dangerous tool) still prompts by default
+  — only file edits are auto-allowed.
+- Deny rules still fire — anything explicitly in the deny list is
+  still blocked regardless of posture.
+
+The cautious `default` posture is one Shift+Tab away when the user
+wants it; the burdensome path shouldn't be the bundled default.
+
+Claude Code ships with `default` as default partly because their
+audience includes high-stakes shared environments (terminals on
+production servers, etc.). Crest is a personal terminal, used
+overwhelmingly for local coding work — `acceptEdits` matches that
+audience.
+
+The overlay status indicator displays the current posture so the
+user always knows what they're in.
 
 **Posture × Mode interaction:** posture only changes behavior for
 calls the rule engine would otherwise *ask* about. In `ask` mode
@@ -294,9 +324,9 @@ Backend request body grows a new optional field:
 ```jsonc
 // POST /api/post-agent-message
 {
-  "mode": "do",                       // ask | plan | do | bench
-  "permissionPosture": "default",     // default | acceptEdits | bypassPermissions | bench
-                                      // (omittable; falls back to settings.defaultPosture or "default")
+  "mode": "do",                          // ask | plan | do | bench
+  "permissionPosture": "acceptEdits",    // default | acceptEdits | bypassPermissions | bench
+                                         // (omittable; falls back to settings.defaultPosture, then to "acceptEdits")
   // ... existing fields
 }
 ```
@@ -605,8 +635,8 @@ type AIPermissionsConfig struct {
     Allow          []string `json:"allow,omitempty"`          // "shell_exec(prefix:npm)"
     Deny           []string `json:"deny,omitempty"`
     Ask            []string `json:"ask,omitempty"`
-    DefaultMode    string   `json:"defaultMode,omitempty"`    // "ask"|"plan"|"do" — bench is API-only
-    DefaultPosture string   `json:"defaultPosture,omitempty"` // "default"|"acceptEdits"|"bypassPermissions"
+    DefaultMode    string   `json:"defaultMode,omitempty"`    // "ask"|"plan"|"do" — bench is API-only. Defaults to "do".
+    DefaultPosture string   `json:"defaultPosture,omitempty"` // "default"|"acceptEdits"|"bypassPermissions". Defaults to "acceptEdits".
 }
 ```
 
@@ -727,6 +757,7 @@ Estimated: 2 sittings to step 6 (functional parity with mode behavior
 | Skip classifier for v1 | Matches user's "ship rules first" call; classifier is a separate >1 sitting lift involving prompt design + Statsig-equivalent gating |
 | **Mode and Posture are orthogonal axes** | Conflating them (single picker with `ask`/`plan`/`do`/`bypassPermissions`) mixes two unrelated concepts. Mode = what work the agent does (tool list, prompt, budget); Posture = how strict approvals are. The user can flip into `bypassPermissions` mid-session without disturbing their work mode. Resolved 2026-04-27 per user direction |
 | Posture set: `default` / `acceptEdits` / `bypassPermissions` (+ hidden `bench`) | Matches Claude Code's permission modes minus `plan` (which is a Crest *mode*, not a posture) and `dontAsk` (niche; defer to v2). `acceptEdits` is the highest-value addition — clicking through every code edit is the #1 friction in interactive use. Resolved 2026-04-27 per user direction |
+| Bundled default posture is `acceptEdits`, not `default` | Diverges from Claude Code (which ships `default` as default). Rationale: Crest's audience is personal local-coding workflows where iterative edits dominate; the cautious `default` posture is one Shift+Tab away. Risk is bounded by file backups (`filebackup.MakeFileBackup`), mtime tracking (commit `0ce9f60b`), bypass-immune paths still prompting (`.env`, `.git/`, `.ssh/`), `shell_exec` still prompting, and deny rules still firing. Resolved 2026-04-27 per user direction |
 | `Shift+Tab` cycles posture | Matches Claude's keybinding. Cycle order: `default` → `acceptEdits` → `bypassPermissions` → `default`. The `/permission` slash command is the alternative for users who don't know the keybinding |
 | `bench` mode + `bench` posture stay implicitly coupled | When the API receives `mode: "bench"`, posture is forced to `bench` regardless of any explicit value. Eval harnesses don't think about posture; they just say "I'm running benchmarks." Backward compatible with Harbor adapter |
 | `bench` hidden from user-facing mode picker (API-only) | A user picking `bench` from a picker would unwittingly disable safety. Harbor/eval is the only legitimate audience and they POST `mode: "bench"` directly. Frontend mode list: `[ask, plan, do]`. Posture toggle is the user-facing knob for strictness. Resolved 2026-04-27 per user direction |
@@ -762,10 +793,16 @@ of structural feedback resolved same day:
   `bypassPermissions` next to `ask`/`plan`/`do` in a single picker
   conflates two unrelated concepts. Resolution: split into two
   orthogonal axes (mode = tools/prompt/budget; posture =
-  strictness). User-facing posture set is `default` (default),
-  `acceptEdits` (Shift+Tab), `bypassPermissions`. Bench remains a
-  privileged mode+posture pair the API can request but the UI
-  doesn't expose.
+  strictness). User-facing posture set is `default`, `acceptEdits`
+  (Shift+Tab), `bypassPermissions`. Bench remains a privileged
+  mode+posture pair the API can request but the UI doesn't expose.
+- **Q6 — Bundled default posture.** User feedback: clicking through
+  every approval is too cumbersome. Resolution: bundled default
+  posture is `acceptEdits`, not `default`. Diverges from Claude Code
+  but matches Crest's audience (personal local-coding workflows).
+  Risk bounded by file backups, mtime tracking, bypass-immune
+  paths, deny rules, and `shell_exec` still prompting. The cautious
+  `default` posture remains one Shift+Tab away.
 
 ---
 

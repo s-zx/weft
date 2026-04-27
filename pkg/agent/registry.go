@@ -12,20 +12,24 @@ import (
 const BrowserToolNamespace = "browser"
 const ApprovalCategoryBrowser = "browser"
 
-// ToolsForMode returns the concrete ToolDefinition list the step loop will see
-// for this turn. Each tool is constructed fresh per request so closures capture
-// the right session + mode.
-func ToolsForMode(sess *Session) []uctypes.ToolDefinition {
-	if sess == nil || sess.Mode == nil {
+// ToolsForSession returns the concrete ToolDefinition list the step
+// loop will see for this turn. Each tool is constructed fresh per
+// request so closures capture the right session. The tool list is
+// derived from the session's mode string (legacy API behavior — once
+// the FE sends an explicit tool allowlist, this collapses to "iterate
+// sess.Tools").
+func ToolsForSession(sess *Session) []uctypes.ToolDefinition {
+	if sess == nil {
 		return nil
 	}
-	out := make([]uctypes.ToolDefinition, 0, len(sess.Mode.ToolNames))
-	for _, name := range sess.Mode.ToolNames {
+	names := ToolNamesForMode(sess.Mode)
+	out := make([]uctypes.ToolDefinition, 0, len(names))
+	for _, name := range names {
 		if td, ok := buildTool(name, sess); ok {
 			out = append(out, td)
 		}
 	}
-	if sess.Mode.AllowMutation {
+	if AllowMutationForMode(sess.Mode) {
 		out = append(out, mcp.GetManager().GetAllTools()...)
 	}
 	return out
@@ -87,11 +91,7 @@ func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 			ParentCtx:  sess.Ctx,
 			Cwd:        sess.Cwd,
 			PromptForMode: func(modeName string) []string {
-				m, ok := LookupMode(modeName)
-				if !ok {
-					return nil
-				}
-				return SystemPromptForMode(m)
+				return SystemPromptByKey(modeName)
 			},
 			ToolsForMode: func(modeName string) []uctypes.ToolDefinition { return toolsForModeByName(modeName, sess) },
 		}
@@ -100,21 +100,24 @@ func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 	return uctypes.ToolDefinition{}, false
 }
 
+// toolsForModeByName builds the toolbox a spawn_task subagent sees,
+// given the parent session for terminal context (TabID / BlockID /
+// Cwd / Connection) and the subtask's mode name. Just clones the
+// session with a different mode string.
 func toolsForModeByName(modeName string, sess *Session) []uctypes.ToolDefinition {
-	m, ok := LookupMode(modeName)
-	if !ok {
+	if !ValidMode(modeName) {
 		return nil
 	}
 	subSess := &Session{
 		ChatID:     sess.ChatID,
 		TabID:      sess.TabID,
 		BlockID:    sess.BlockID,
-		Mode:       m,
+		Mode:       modeName,
 		AIOpts:     sess.AIOpts,
 		Cwd:        sess.Cwd,
 		Connection: sess.Connection,
 	}
-	return ToolsForMode(subSess)
+	return ToolsForSession(subSess)
 }
 
 // engineDeferredApproval is the policy-deferred fallback installed

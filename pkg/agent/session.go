@@ -16,7 +16,11 @@ type Session struct {
 	ChatID      string
 	TabID       string
 	BlockID     string
-	Mode        *Mode
+	// Mode is the canonical API mode string ("ask" / "plan" / "do" /
+	// "bench"). The Mode struct is gone; per-mode data is now spread
+	// across ToolNamesForMode / AllowMutationForMode / StepBudgetForMode
+	// in profile.go. Empty defaults to "do".
+	Mode        string
 	AIOpts      uctypes.AIOptsType
 	Cwd         string
 	Connection  string

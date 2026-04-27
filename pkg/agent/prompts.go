@@ -31,27 +31,27 @@ func mustLoadPrompt(name string) string {
 	return strings.TrimSpace(string(data))
 }
 
-// SystemPromptForMode returns the full system-prompt parts for the given mode:
-// the shared header plus the mode-specific prompt. Terminal context is appended
-// separately via BuildTerminalContext so it updates per request.
-func SystemPromptForMode(mode *Mode) []string {
-	if mode == nil {
-		return []string{sharedHeader}
-	}
-	var modePrompt string
-	switch mode.Name {
+// SystemPromptByKey returns the system-prompt parts for the given
+// API mode string: the shared header plus the mode-specific prompt.
+// Terminal context is appended separately via BuildTerminalContext
+// so it updates per request.
+//
+// Per docs/permissions-v2-design.md §10, the bundled prompt set
+// doesn't change in v2 — the Mode struct is gone but the four prompt
+// files (ask.md / plan.md / do.md / bench.md) stay shipped and keyed
+// off the API mode string. Empty / unknown mode names map to "do"
+// (the everyday-coding prompt) via NormalizeMode.
+func SystemPromptByKey(name string) []string {
+	switch NormalizeMode(name) {
 	case ModeAsk:
-		modePrompt = askPrompt
+		return []string{sharedHeader, askPrompt}
 	case ModePlan:
-		modePrompt = planPrompt
-	case ModeDo:
-		modePrompt = doPrompt
+		return []string{sharedHeader, planPrompt}
 	case ModeBench:
-		modePrompt = benchPrompt
+		return []string{sharedHeader, benchPrompt}
 	default:
-		modePrompt = doPrompt
+		return []string{sharedHeader, doPrompt}
 	}
-	return []string{sharedHeader, modePrompt}
 }
 
 // BuildToolPromptSection returns the per-tool usage guidance block for the

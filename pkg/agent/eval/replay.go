@@ -80,10 +80,10 @@ func RunGoldenTest(t *testing.T, transcript *GoldenTranscript) {
 
 	cwd := setupWorkspace(t, transcript.Setup)
 
-	mode, ok := agent.LookupMode(transcript.Mode)
-	if !ok {
+	if !agent.ValidMode(transcript.Mode) {
 		t.Fatalf("unknown mode: %s", transcript.Mode)
 	}
+	modeName := agent.NormalizeMode(transcript.Mode)
 
 	allResponses := collectAllResponses(transcript.Turns, cwd)
 	mockBackend := MakeMockBackend(allResponses)
@@ -92,15 +92,15 @@ func RunGoldenTest(t *testing.T, transcript *GoldenTranscript) {
 		ChatID:  uuid.New().String(),
 		TabID:   "eval-tab",
 		BlockID: "eval-block",
-		Mode:    mode,
+		Mode:    modeName,
 		Cwd:     cwd,
 	}
 
-	tools := agent.ToolsForMode(sess)
+	tools := agent.ToolsForSession(sess)
 	for i := range tools {
 		tools[i].ToolApproval = func(any) string { return uctypes.ApprovalAutoApproved }
 	}
-	systemPrompt := agent.SystemPromptForMode(mode)
+	systemPrompt := agent.SystemPromptByKey(modeName)
 
 	chatOpts := uctypes.WaveChatOpts{
 		ChatId:       "eval:" + sess.ChatID,

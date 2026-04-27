@@ -216,8 +216,8 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 	// === Cache-stable prefix ===
 	// shared header → mode prompt → tool prompts (sorted). These rarely
 	// change within a chat, so providers can cache the prefix.
-	systemPrompt := SystemPromptForMode(opts.Session.Mode)
-	toolList := ToolsForMode(opts.Session)
+	systemPrompt := SystemPromptByKey(opts.Session.Mode)
+	toolList := ToolsForSession(opts.Session)
 	if toolPrompts := BuildToolPromptSection(toolList); toolPrompts != "" {
 		systemPrompt = append(systemPrompt, toolPrompts)
 	}
@@ -239,9 +239,9 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 	}
 
 	agentChatId := AgentChatStorePrefix + opts.Session.ChatID
-	maxSteps := DefaultMaxAgentSteps
-	if opts.Session.Mode != nil && opts.Session.Mode.StepBudget > 0 {
-		maxSteps = opts.Session.Mode.StepBudget
+	maxSteps := StepBudgetForMode(opts.Session.Mode)
+	if maxSteps <= 0 {
+		maxSteps = DefaultMaxAgentSteps
 	}
 	eng := DefaultPermissionsEngine()
 	posture := resolvePosture(opts.Session, eng)

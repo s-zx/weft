@@ -344,11 +344,11 @@ func PostAgentMessageHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "chatid must be a valid UUID", http.StatusBadRequest)
 		return
 	}
-	mode, ok := LookupMode(req.Mode)
-	if !ok {
+	if !ValidMode(req.Mode) {
 		http.Error(w, fmt.Sprintf("unknown agent mode %q (valid: ask, plan, do, bench)", req.Mode), http.StatusBadRequest)
 		return
 	}
+	modeName := NormalizeMode(req.Mode)
 	if err := req.Msg.Validate(); err != nil {
 		http.Error(w, fmt.Sprintf("Message validation failed: %v", err), http.StatusBadRequest)
 		return
@@ -381,7 +381,7 @@ func PostAgentMessageHandler(w http.ResponseWriter, r *http.Request) {
 		ChatID:      req.ChatID,
 		TabID:       req.TabId,
 		BlockID:     req.BlockId,
-		Mode:        mode,
+		Mode:        modeName,
 		AIOpts:      *aiOpts,
 		Cwd:         req.Context.Cwd,
 		Connection:  req.Context.Connection,

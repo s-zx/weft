@@ -52,9 +52,9 @@ func BuildTerminalContext(sess *Session) string {
 			b.WriteString("\n")
 		}
 	}
-	if sess.Mode != nil {
+	if sess.Mode != "" {
 		b.WriteString("agent_mode: ")
-		b.WriteString(sess.Mode.Name)
+		b.WriteString(sess.Mode)
 		b.WriteString("\n")
 	}
 	b.WriteString("</terminal_context>")

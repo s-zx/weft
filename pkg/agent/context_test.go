@@ -9,12 +9,11 @@ import (
 )
 
 func TestBuildTerminalContext_Full(t *testing.T) {
-	mode, _ := LookupMode(ModeDo)
 	sess := &Session{
 		ChatID:      "test-chat-id",
 		TabID:       "test-tab-id",
 		BlockID:     "test-block-id",
-		Mode:        mode,
+		Mode:        ModeDo,
 		Cwd:         "/home/user/project",
 		Connection:  "ssh:myserver",
 		LastCommand: "go test ./...",
@@ -40,12 +39,11 @@ func TestBuildTerminalContext_Full(t *testing.T) {
 }
 
 func TestBuildTerminalContext_Minimal(t *testing.T) {
-	mode, _ := LookupMode(ModeAsk)
 	sess := &Session{
 		ChatID:  "id",
 		TabID:   "tab",
 		BlockID: "block",
-		Mode:    mode,
+		Mode:    ModeAsk,
 	}
 
 	out := BuildTerminalContext(sess)

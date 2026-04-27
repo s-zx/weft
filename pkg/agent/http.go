@@ -75,16 +75,24 @@ func readPlanContext(planPath, cwd string) (string, error) {
 // The frontend sends the user's message plus the terminal context it already
 // has (cwd, connection, last command, recent commands). Mode prefix parsing
 // happens client-side — this handler just reads the final mode.
+//
+// Permission posture lives on a separate axis from Mode (per
+// docs/permissions-v2-design.md). The FE will eventually send
+// `permission_posture` directly via Shift+Tab; until then, the only
+// API-side posture override is the `mode: "bench"` alias used by eval
+// harnesses (Harbor/TB2) — that gets translated to PostureBench
+// inside the handler.
 type PostAgentMessageRequest struct {
-	ChatID        string            `json:"chatid"`
-	TabId         string            `json:"tabid"`
-	BlockId       string            `json:"blockid"`
-	Mode          string            `json:"mode"`
-	AIMode        string            `json:"aimode"`
-	ModelOverride string            `json:"modeloverride,omitempty"`
-	PlanPath      string            `json:"planpath,omitempty"`
-	Msg           uctypes.AIMessage `json:"msg"`
-	Context       AgentContext      `json:"context,omitempty"`
+	ChatID            string            `json:"chatid"`
+	TabId             string            `json:"tabid"`
+	BlockId           string            `json:"blockid"`
+	Mode              string            `json:"mode"`
+	PermissionPosture string            `json:"permission_posture,omitempty"`
+	AIMode            string            `json:"aimode"`
+	ModelOverride     string            `json:"modeloverride,omitempty"`
+	PlanPath          string            `json:"planpath,omitempty"`
+	Msg               uctypes.AIMessage `json:"msg"`
+	Context           AgentContext      `json:"context,omitempty"`
 }
 
 type AgentContext struct {
@@ -360,16 +368,26 @@ func PostAgentMessageHandler(w http.ResponseWriter, r *http.Request) {
 		aiOpts.Model = trimmed
 	}
 
+	// Resolve posture. `mode: "bench"` forces PostureBench (eval-harness
+	// alias) regardless of any explicit permission_posture. Otherwise
+	// take the explicit field if set, else "" so RunAgent's
+	// resolvePosture picks the user default.
+	posture := req.PermissionPosture
+	if req.Mode == ModeBench {
+		posture = "bench"
+	}
+
 	sess := &Session{
-		ChatID:     req.ChatID,
-		TabID:      req.TabId,
-		BlockID:    req.BlockId,
-		Mode:       mode,
-		AIOpts:     *aiOpts,
+		ChatID:      req.ChatID,
+		TabID:       req.TabId,
+		BlockID:     req.BlockId,
+		Mode:        mode,
+		AIOpts:      *aiOpts,
 		Cwd:         req.Context.Cwd,
 		Connection:  req.Context.Connection,
 		LastCommand: req.Context.LastCommand,
 		RecentCmds:  req.Context.RecentCmds,
+		Posture:     posture,
 	}
 
 	var planContext string

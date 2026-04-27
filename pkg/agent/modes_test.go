@@ -3,11 +3,7 @@
 
 package agent
 
-import (
-	"testing"
-
-	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
-)
+import "testing"
 
 func TestLookupMode_ValidModes(t *testing.T) {
 	for _, name := range []string{ModeAsk, ModePlan, ModeDo, ModeBench} {
@@ -35,52 +31,6 @@ func TestLookupMode_Unknown(t *testing.T) {
 	_, ok := LookupMode("invalid")
 	if ok {
 		t.Fatal("LookupMode(\"invalid\") should return ok=false")
-	}
-}
-
-func TestResolveApproval_AskAutoAll(t *testing.T) {
-	m, _ := LookupMode(ModeAsk)
-	got := m.ResolveApproval("read_text_file", uctypes.ApprovalNeedsApproval)
-	if got != uctypes.ApprovalAutoApproved {
-		t.Fatalf("ask mode should auto-approve all, got %q", got)
-	}
-}
-
-func TestResolveApproval_DoRequiresMutation(t *testing.T) {
-	m, _ := LookupMode(ModeDo)
-	mutations := []string{"write_text_file", "edit_text_file", "shell_exec", "create_block"}
-	for _, tool := range mutations {
-		got := m.ResolveApproval(tool, uctypes.ApprovalAutoApproved)
-		if got != uctypes.ApprovalNeedsApproval {
-			t.Fatalf("do mode should require approval for %q, got %q", tool, got)
-		}
-	}
-}
-
-func TestResolveApproval_DoAutoReads(t *testing.T) {
-	m, _ := LookupMode(ModeDo)
-	reads := []string{"read_text_file", "read_dir", "get_scrollback", "cmd_history"}
-	for _, tool := range reads {
-		got := m.ResolveApproval(tool, uctypes.ApprovalNeedsApproval)
-		if got != uctypes.ApprovalAutoApproved {
-			t.Fatalf("do mode should auto-approve %q, got %q", tool, got)
-		}
-	}
-}
-
-func TestResolveApproval_FallsBackToDefault(t *testing.T) {
-	m, _ := LookupMode(ModeDo)
-	got := m.ResolveApproval("unknown_tool", uctypes.ApprovalNeedsApproval)
-	if got != uctypes.ApprovalNeedsApproval {
-		t.Fatalf("unknown tool should fall back to default, got %q", got)
-	}
-}
-
-func TestResolveApproval_NilMode(t *testing.T) {
-	var m *Mode
-	got := m.ResolveApproval("anything", uctypes.ApprovalNeedsApproval)
-	if got != uctypes.ApprovalNeedsApproval {
-		t.Fatalf("nil mode should return default, got %q", got)
 	}
 }
 
@@ -123,7 +73,11 @@ func TestModeAllowMutation(t *testing.T) {
 	if !benchMode.AllowMutation {
 		t.Fatal("bench mode should allow mutation")
 	}
-	if !benchMode.Approval.AutoApproveAll {
-		t.Fatal("bench mode should auto-approve all")
+}
+
+func TestModeBenchHasLargerStepBudget(t *testing.T) {
+	benchMode, _ := LookupMode(ModeBench)
+	if benchMode.StepBudget <= DefaultStepBudget {
+		t.Fatalf("bench step budget %d should exceed default %d", benchMode.StepBudget, DefaultStepBudget)
 	}
 }

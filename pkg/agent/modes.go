@@ -1,9 +1,26 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
+//
+// TODO(permissions-v2 follow-up, see docs/permissions-v2-design.md §11.2):
+// this file is slated for full deletion. The current state — Mode struct
+// holding ToolNames + AllowMutation + StepBudget + FailureBudget — is a
+// halfway point. Approval policy was extracted into pkg/agent/permissions
+// in this sitting; the remaining responsibilities still need new homes:
+//
+//   - ToolNames: should source from a session-level tool allowlist
+//     (mirroring the `--tools` CLI flag described in design §10).
+//   - StepBudget / FailureBudget: should be functions of posture (bench →
+//     100, others → 40) rather than a per-mode constant.
+//   - AllowMutation: redundant once permissions rules drive the actual
+//     authorization — the engine refuses mutations the user hasn't
+//     allowed regardless of whether the tool is in the toolbox.
+//   - SystemPromptForMode: no longer mode-aware; collapses to a single
+//     default with SYSTEM.md user override.
+//
+// Until that refactor lands modes.go stays as a tool list + budget
+// dispatcher.
 
 package agent
-
-import "github.com/s-zx/crest/pkg/aiusechat/uctypes"
 
 const (
 	ModeAsk   = "ask"
@@ -17,24 +34,24 @@ const (
 	DefaultFailureBudget = 3
 )
 
-// ApprovalPolicy controls which tool calls are auto-approved vs require user approval.
-// Resolution order per tool invocation:
-//  1. AutoApproveAll → auto
-//  2. Name in RequireApproval → needs approval
-//  3. Name in AutoApproveTools → auto
-//  4. Fallback behavior is tool-specific (read tools auto, mutation tools need approval)
-type ApprovalPolicy struct {
-	AutoApproveAll   bool
-	AutoApproveTools map[string]bool
-	RequireApproval  map[string]bool
-}
-
+// Mode is a per-turn bundle: tool list, mutation gate, step/failure
+// budgets. Approval policy used to live here too — that's been
+// extracted into pkg/agent/permissions (Engine + posture + rules) so
+// modes are now a pure "what tools can the agent see, how long can it
+// run" struct. Plan-mode-style enforcement (no edits) was previously
+// done via ApprovalPolicy and is now simply a function of which tools
+// land in ToolNames; if `edit_text_file` isn't here, the model can't
+// call it.
+//
+// `bench` survives because eval harnesses need a longer step budget
+// (100 vs 40) and a different failure budget. The HTTP handler also
+// translates `mode: "bench"` → posture `bench` for permissions
+// (see http.go).
 type Mode struct {
 	Name          string
 	DisplayName   string
 	ToolNames     []string
 	AllowMutation bool
-	Approval      ApprovalPolicy
 	StepBudget    int
 	FailureBudget int
 }
@@ -54,9 +71,6 @@ var modes = map[string]*Mode{
 			"web_fetch",
 		},
 		AllowMutation: false,
-		Approval: ApprovalPolicy{
-			AutoApproveAll: true,
-		},
 		StepBudget:    DefaultStepBudget,
 		FailureBudget: DefaultFailureBudget,
 	},
@@ -73,16 +87,6 @@ var modes = map[string]*Mode{
 			"web_fetch",
 		},
 		AllowMutation: false,
-		Approval: ApprovalPolicy{
-			AutoApproveTools: map[string]bool{
-				"read_text_file": true,
-				"read_dir":       true,
-				"search":         true,
-				"get_scrollback": true,
-				"cmd_history":    true,
-				"write_plan":     true,
-			},
-		},
 		StepBudget:    DefaultStepBudget,
 		FailureBudget: DefaultFailureBudget,
 	},
@@ -111,24 +115,6 @@ var modes = map[string]*Mode{
 			"todo_read",
 		},
 		AllowMutation: true,
-		Approval: ApprovalPolicy{
-			AutoApproveTools: map[string]bool{
-				"read_text_file": true,
-				"read_dir":       true,
-				"get_scrollback": true,
-				"cmd_history":    true,
-			},
-			RequireApproval: map[string]bool{
-				"write_text_file":  true,
-				"edit_text_file":   true,
-				"shell_exec":       true,
-				"create_block":     true,
-				"web_fetch":        true,
-				"spawn_task":       true,
-				"browser.navigate": true,
-				"browser.click":    true,
-			},
-		},
 		StepBudget:    DefaultStepBudget,
 		FailureBudget: DefaultFailureBudget,
 	},
@@ -149,9 +135,6 @@ var modes = map[string]*Mode{
 			"todo_read",
 		},
 		AllowMutation: true,
-		Approval: ApprovalPolicy{
-			AutoApproveAll: true,
-		},
 		StepBudget:    BenchStepBudget,
 		FailureBudget: 10,
 	},
@@ -163,23 +146,4 @@ func LookupMode(name string) (*Mode, bool) {
 	}
 	m, ok := modes[name]
 	return m, ok
-}
-
-// ResolveApproval returns one of uctypes.ApprovalAutoApproved or uctypes.ApprovalNeedsApproval
-// for the given tool name under this mode. Pass the default the tool itself would choose if
-// no mode policy applies (e.g. "auto" for reads, "needs-approval" for writes).
-func (m *Mode) ResolveApproval(toolName string, defaultApproval string) string {
-	if m == nil {
-		return defaultApproval
-	}
-	if m.Approval.AutoApproveAll {
-		return uctypes.ApprovalAutoApproved
-	}
-	if m.Approval.RequireApproval[toolName] {
-		return uctypes.ApprovalNeedsApproval
-	}
-	if m.Approval.AutoApproveTools[toolName] {
-		return uctypes.ApprovalAutoApproved
-	}
-	return defaultApproval
 }

@@ -33,47 +33,54 @@ func ToolsForMode(sess *Session) []uctypes.ToolDefinition {
 
 // buildTool maps a canonical tool name to its per-session ToolDefinition.
 // Unknown names are ignored so a typo in a mode definition fails safe.
+//
+// The per-tool `ToolApproval` callback is no longer the policy
+// authority — pkg/agent/permissions.Engine decides via
+// WaveChatOpts.ApprovalDecider. We pass engineDeferredApproval here
+// as a fail-closed safety net: if a code path forgets to wire the
+// engine the tool lands in the approval prompt rather than running
+// silently. See engineDeferredApproval below for the rationale.
 func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 	chatScope := AgentChatStorePrefix + sess.ChatID
 	switch name {
 	case "read_text_file":
-		return tools.ReadTextFile(chatScope, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.ReadTextFile(chatScope, engineDeferredApproval), true
 	case "read_dir":
-		return tools.ReadDir(approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.ReadDir(engineDeferredApproval), true
 	case "get_scrollback":
-		return tools.GetScrollback(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.GetScrollback(sess.TabID, engineDeferredApproval), true
 	case "cmd_history":
-		return tools.CmdHistory(sess.BlockID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.CmdHistory(sess.BlockID, engineDeferredApproval), true
 	case "write_text_file":
-		return tools.WriteTextFile(chatScope, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.WriteTextFile(chatScope, engineDeferredApproval), true
 	case "edit_text_file":
-		return tools.EditTextFile(chatScope, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.EditTextFile(chatScope, engineDeferredApproval), true
 	case "shell_exec":
-		return tools.ShellExec(sess.TabID, sess.BlockID, sess.Cwd, sess.Connection, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.ShellExec(sess.TabID, sess.BlockID, sess.Cwd, sess.Connection, engineDeferredApproval), true
 	case "write_plan":
-		return tools.WritePlan(sess.TabID, sess.BlockID, sess.Cwd, sess.Connection, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.WritePlan(sess.TabID, sess.BlockID, sess.Cwd, sess.Connection, engineDeferredApproval), true
 	case "create_block":
-		return tools.CreateBlock(sess.TabID, sess.BlockID, sess.Connection, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.CreateBlock(sess.TabID, sess.BlockID, sess.Connection, engineDeferredApproval), true
 	case "focus_block":
-		return tools.FocusBlock(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.FocusBlock(sess.TabID, engineDeferredApproval), true
 	case "browser.navigate":
-		return tools.BrowserNavigate(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.BrowserNavigate(sess.TabID, engineDeferredApproval), true
 	case "browser.read_text":
-		return tools.BrowserReadText(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.BrowserReadText(sess.TabID, engineDeferredApproval), true
 	case "browser.click":
-		return tools.BrowserClick(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.BrowserClick(sess.TabID, engineDeferredApproval), true
 	case "browser.screenshot":
-		return tools.BrowserScreenshot(sess.TabID, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.BrowserScreenshot(sess.TabID, engineDeferredApproval), true
 	case "search":
-		return tools.Search(sess.Cwd, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.Search(sess.Cwd, engineDeferredApproval), true
 	case "multi_edit":
-		return tools.MultiEdit(chatScope, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.MultiEdit(chatScope, engineDeferredApproval), true
 	case "todo_write":
-		return tools.TodoWrite(AgentChatStorePrefix+sess.ChatID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.TodoWrite(AgentChatStorePrefix+sess.ChatID, engineDeferredApproval), true
 	case "todo_read":
-		return tools.TodoRead(AgentChatStorePrefix+sess.ChatID, approvalResolver(sess, name, uctypes.ApprovalAutoApproved)), true
+		return tools.TodoRead(AgentChatStorePrefix+sess.ChatID, engineDeferredApproval), true
 	case "web_fetch":
-		return tools.WebFetch(approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.WebFetch(engineDeferredApproval), true
 	case "spawn_task":
 		cfg := tools.SpawnTaskConfig{
 			ParentOpts: sess.AIOpts,
@@ -88,7 +95,7 @@ func buildTool(name string, sess *Session) (uctypes.ToolDefinition, bool) {
 			},
 			ToolsForMode: func(modeName string) []uctypes.ToolDefinition { return toolsForModeByName(modeName, sess) },
 		}
-		return tools.SpawnTask(cfg, approvalResolver(sess, name, uctypes.ApprovalNeedsApproval)), true
+		return tools.SpawnTask(cfg, engineDeferredApproval), true
 	}
 	return uctypes.ToolDefinition{}, false
 }
@@ -110,10 +117,21 @@ func toolsForModeByName(modeName string, sess *Session) []uctypes.ToolDefinition
 	return ToolsForMode(subSess)
 }
 
-// approvalResolver returns a closure that consults the session's mode policy.
-func approvalResolver(sess *Session, toolName string, defaultApproval string) func(any) string {
-	mode := sess.Mode
-	return func(any) string {
-		return mode.ResolveApproval(toolName, defaultApproval)
-	}
+// engineDeferredApproval is the policy-deferred fallback installed
+// on every tool's ToolApproval slot now that the permissions engine
+// owns the real decision. The engine runs ahead of this callback in
+// CreateToolUseData; this fallback only gets consulted when no
+// ApprovalDecider is wired (legacy WaveChatOpts callers, tests, eval
+// harnesses without the agent runtime).
+//
+// Returns ApprovalNeedsApproval to fail CLOSED. An earlier draft
+// returned "" which IsApproved() treats as approved — that meant a
+// caller forgetting to wire the engine got silent auto-approve on
+// every tool, with no log line. Failing closed means the worst case
+// is "user sees an approval prompt for every tool" instead of
+// "destructive call ran unchecked." Production paths (RunAgent →
+// makeApprovalDecider) always wire the decider so users never see
+// this in normal use.
+func engineDeferredApproval(_ any) string {
+	return uctypes.ApprovalNeedsApproval
 }

@@ -1,22 +1,19 @@
 # Permissions v2 — Design Doc
 
-**Status:** draft for review · **Owner:** native-agent worktree · **Date:** 2026-04-27
+**Status:** revised draft · **Owner:** native-agent worktree · **Date:** 2026-04-27 (revised)
 **Tracker:** [`claude-code-parity.md`](./claude-code-parity.md) §3
-**Reference design:** Claude Code (`/Users/user/Documents/Claude-Code/`), particularly:
-- `src/types/permissions.ts` — types, modes, rule shape
-- `src/utils/permissions/permissions.ts` — decision pipeline (`hasPermissionsToUseToolInner`)
-- `src/utils/permissions/PermissionMode.ts`, `getNextPermissionMode.ts`
-- `src/components/permissions/PermissionPrompt.tsx` — approval UI
-- `src/hooks/toolPermission/PermissionContext.ts` — hook integration
+**Reference designs:**
+- Claude Code (`/Users/user/Documents/Claude-Code/`) — rule grammar, decision pipeline, bypass-immune safety
+- pi-mono (`badlogic/pi-mono`) — minimalism: drop Mode, drop prompt templates, derive everything from rules + posture
+
+> **What changed from earlier drafts:** the **Mode** axis (`ask` / `plan` / `do`) is gone. After deciding the prior design's Mode×Posture×Rules×Safety was 4-dimensional and confusing for a simplification effort, we collapsed Mode into rules + system-prompt customization. There is now exactly **one work axis (rules) and one strictness axis (posture)**. `bench` survives as an API-only hidden escape for eval harnesses. No prompt-template / `/plan` / `/ask` slash commands — see §10 for what replaces them.
 
 ---
 
-## 1. Context
-
-Today's permission system in Crest is mode-only:
+## 1. Why v1 isn't enough
 
 ```go
-// pkg/agent/modes.go
+// pkg/agent/modes.go (existing)
 type ApprovalPolicy struct {
     AutoApproveAll   bool
     AutoApproveTools map[string]bool
@@ -24,88 +21,86 @@ type ApprovalPolicy struct {
 }
 ```
 
-Each tool call → `mode.ResolveApproval(toolName)` → `auto-approved` or
-`needs-approval`. The frontend shows Approve/Deny buttons
-(`term-agent.tsx:163`). One-shot per call: no remembering, no path
-patterns, no shell-command patterns, no persistence.
+Every tool call → `mode.ResolveApproval(toolName)` → `auto-approved` or `needs-approval`. One-shot per call. Breaks down for:
 
-This is fine for short interactive sessions but breaks down for:
-- **Real coding work** — every `edit_text_file` needs a click. Users
-  burn out and switch to `bench` (`AutoApproveAll`), losing all safety.
-- **Repeated commands** — running `npm install` 8 times in a debugging
-  session = 8 approval prompts.
-- **Path-aware safety** — currently can't say "auto-allow writes
-  inside cwd, prompt for everything else."
-- **No record** — chat ends, every preference learned during it is
-  gone.
+- **Real coding work** — every `edit_text_file` needs a click. Users burn out and switch to `bench` (`AutoApproveAll`), losing all safety.
+- **Repeated commands** — running `npm install` 8 times in a debugging session = 8 prompts.
+- **Path-aware safety** — currently can't say "auto-allow writes inside cwd, prompt for everything else."
+- **No memory** — chat ends, every preference learned during it is gone.
 
-**Goal:** match Claude Code's permission expressiveness with rules ×
-scopes × modes, while staying within Crest's terminal/Go/React stack
-and keeping the existing mode-based UX as the default.
+Plus the v1 system mixes 5 concepts that should be separate (mode → tool list → approval policy → state machine → UI). Adding granularity on top of that mix doesn't help; the mix itself has to go.
 
 ---
 
-## 2. Goals and Non-Goals
+## 2. Architecture: three layers, two user-facing axes
 
-### v1 in-scope
+```
+┌──────────────────────────────────────────────────────────────┐
+│  Tool allowlist (process startup, immutable for the run)     │
+│  --tools / --no-builtin-tools / --no-tools                   │
+│  Bound at agent launch, defines the universe of available    │
+│  tools. The permission engine never sees calls to tools      │
+│  excluded here.                                              │
+└──────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│  System prompt (single source, project + global override)    │
+│  pkg/agent/prompts/*.md → ~/.crest/SYSTEM.md                 │
+│  → .crest/SYSTEM.md (project) → APPEND_SYSTEM.md             │
+│  Tone, project conventions, custom guidance live here.       │
+│  Permissions don't gate prompt text — that's the user's job. │
+└──────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌──────────────────────────────────────────────────────────────┐
+│  Permission Engine — every tool call passes through          │
+│                                                              │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │  Layer 1 — Bypass-immune Safety                    │    │
+│   │  Hard list (`.git/`, `.ssh/`, `.env*`, `rm -rf /`, │    │
+│   │  `curl|sh`, `prefix:sudo`, force-push to main…).   │    │
+│   │  Always prompts; no posture can disable it.        │    │
+│   └────────────────────────────────────────────────────┘    │
+│                       │                                      │
+│                       ▼                                      │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │  Layer 2 — Rules (allow / deny / ask)              │    │
+│   │  User-defined. Tool-name + content matcher.        │    │
+│   │  Loaded from 5 scopes; deny-anywhere wins.         │    │
+│   └────────────────────────────────────────────────────┘    │
+│                       │                                      │
+│                       ▼                                      │
+│   ┌────────────────────────────────────────────────────┐    │
+│   │  Layer 3 — Posture default                         │    │
+│   │  default → ask · acceptEdits → auto-allow edits    │    │
+│   │  · bypass → auto-allow all (still constrained by   │    │
+│   │  Layer 1) · bench → auto-allow ignoring Layer 1    │    │
+│   └────────────────────────────────────────────────────┘    │
+└──────────────────────────────────────────────────────────────┘
+```
 
-- **Rules** with tool-level + content-specific matchers (path globs for
-  file tools, prefix patterns for `shell_exec`).
-- **Three behaviors:** `allow`, `deny`, `ask`.
-- **Four scopes** (in precedence order): `session` < `localProject` <
-  `sharedProject` < `user`.
-- **Decision pipeline** with deny-first ordering and per-tool
-  `CheckPermissions` extension point.
-- **Approval prompt with suggestions** — "Approve, and remember:
-  `shell_exec(prefix:npm)`" with destination picker.
-- **Settings persistence** in Crest's `wconfig` settings.json.
-- **Bypass mode** (opt-in, with bypass-immune safety checks).
-- **Plan mode** = read-only enforcement via tool-side policy (matches
-  Claude's approach).
-- **Migration path** — existing 4 modes (`ask/plan/do/bench`) become
-  rule presets so existing chats keep working.
+**User-facing axes:**
 
-### v1 out-of-scope (pushed to v2)
+1. **Rules** — `/permissions` opens the editor; approval prompts can persist new rules.
+2. **Posture** — `Shift+Tab` cycles `default → acceptEdits → bypass`; status pill shows current posture.
 
-- **Classifier-based auto-approve** (Claude's `auto`/YOLO mode + LLM
-  transcript classifier). Defer until we ship rules first; classifier
-  is a separate large lift.
-- **PermissionRequest hooks** (webhook callouts). Crest has no hook
-  framework yet; building one is out of scope for permissions.
-- **Policy tier** (admin/enterprise managed settings). Skip until a
-  user asks.
-- **CLI rule management commands** (`crest permissions add`). Settings
-  JSON edit is enough for v1; CLI is a v3 polish item.
-- **Per-additional-directory rules** (Claude's `additionalDirectories`).
-  Useful but adds surface area; defer.
-- **Mode cycling UX** (Shift+Tab to cycle through modes inline).
-  Frontend polish, not core mechanism.
-
-### Non-goals (probably never)
-
-- 1:1 type/method copy of Claude's TypeScript code. Adapt idioms to
-  Go (e.g. struct embedding instead of discriminated unions; channels
-  instead of async/await).
-- Statsig-style feature gates (`tengu_iron_gate_closed`,
-  `tengu_auto_mode_config`). Crest is single-tenant — these are
-  Anthropic-internal concerns.
+**Hidden:** `bench` posture — API-only, activated by Harbor/eval harnesses posting `mode: "bench"`. Users never select it.
 
 ---
 
-## 3. Open Product Questions — Answered
+## 3. Rules
 
-### 3.1 Rule grammar — globs, prefixes, structured?
-
-**Decision:** All three, matching Claude's surface but Go-typed.
+### 3.1 Grammar
 
 ```go
 // pkg/agent/permissions/rule.go
 type Rule struct {
-    Behavior   RuleBehavior // "allow" | "deny" | "ask"
-    ToolName   string       // e.g. "shell_exec", "edit_text_file", "*" for any tool
-    Content    string       // optional; tool-specific matcher syntax
-    Source     RuleSource   // who set it (precedence)
-    AddedAt    int64        // unix ms; for UI only
+    Behavior  RuleBehavior // "allow" | "deny" | "ask"
+    ToolName  string       // "shell_exec", "edit_text_file", "*"
+    Content   string       // optional; tool-specific matcher syntax (see below)
+    Source    RuleSource   // who set it (precedence)
+    AddedAt   int64        // unix ms; for UI only
 }
 
 type RuleBehavior string
@@ -116,9 +111,7 @@ const (
 )
 ```
 
-**Tool-name format** — exact tool name or `*`. MCP tools use the
-existing `mcp__server__tool` convention; `mcp__server__*` matches all
-tools from one server. (Claude does this same thing.)
+**Tool-name format** — exact tool name or `*`. MCP tools use the existing `mcp__server__tool` convention; `mcp__server__*` matches all tools from one server.
 
 **Content matcher** — interpreted by each tool's `MatchContent` method:
 
@@ -129,12 +122,14 @@ tools from one server. (Claude does this same thing.)
 | `read_text_file`, `read_dir` | gitignore-style glob | same |
 | `web_fetch` | URL host/path glob | `https://api.github.com/**`, `https://*.internal/**` |
 | `browser.navigate` | URL host glob | `https://github.com/*` |
-| `spawn_task` | mode name | `do`, `ask` |
+| `spawn_task` | (no content matcher today) | n/a |
 | any other | exact-match content | (rarely needed) |
 
 Empty `Content` matches *any* call to that tool.
 
-**Wire format** in settings.json (compact, human-friendly):
+### 3.2 Wire format
+
+Compact, human-friendly. Lives in settings.json under `ai:permissions`:
 
 ```json
 {
@@ -156,216 +151,286 @@ Empty `Content` matches *any* call to that tool.
       "shell_exec(prefix:npm publish)",
       "shell_exec(prefix:git push --force)"
     ],
-    "defaultMode": "do"
+    "defaultPosture": "acceptEdits"
   }
 }
 ```
 
-(No `bypassEnabled` flag — `bypassPermissions` is freely selectable
-like any other mode. The act of picking it is the consent.)
+`ParseRule(s string) (Rule, error)` splits on the first `(`, escapes `\)` and `\\`. Rejects malformed strings at load time so typos don't silently neuter a rule.
 
-Parser: `ParseRule(s string) (Rule, error)` splits on the first `(`,
-escapes `\)` and `\\`. Rejects malformed strings at load time so
-typos don't silently neuter a rule.
+---
 
-### 3.2 Scopes — what persists where, who wins?
+## 4. Scopes
 
-**Decision:** Four runtime scopes + one CLI scope. Strict precedence
-(higher beats lower):
+Five scopes, strict precedence (higher beats lower):
 
 | # | Scope | Where it lives | Who writes |
 |---|---|---|---|
 | 5 | `cliArg` | runtime, never persisted | `--allow-tool`, `--deny-tool` flags (future) |
 | 4 | `user` | `~/.config/waveterm/settings.json` `ai:permissions` | Settings UI / hand-edit |
 | 3 | `sharedProject` | `<cwd>/.crest/permissions.json` | committed to repo |
-| 2 | `localProject` | `<cwd>/.crest/permissions.local.json` | gitignored |
+| 2 | `localProject` | `<cwd>/.crest/permissions.local.json` | gitignored (per-machine personal) |
 | 1 | `session` | in-memory, lifetime of the agent chat | Approval prompt |
 
-**Decision rule:** when multiple scopes have rules for the same tool,
-**deny in any scope wins**, then highest-precedence ask, then
-highest-precedence allow. (Matches Claude's "deny is uncancellable"
-principle.) Inside the same scope, more-specific content patterns
-beat broader ones (e.g. `shell_exec(prefix:git push)` ask beats
-`shell_exec(prefix:git)` allow).
+**Resolution rule:** when multiple scopes have rules for the same tool:
+1. **Deny in any scope wins.** No way to opt out of a hard deny.
+2. Then highest-precedence `ask`.
+3. Then highest-precedence `allow`.
+
+Within a scope, more-specific content patterns beat broader ones (`shell_exec(prefix:git push)` ask beats `shell_exec(prefix:git)` allow).
 
 **Why this layout:**
-- `user` scope = personal preferences across all projects
-  (`prefix:git status`, etc.)
-- `sharedProject` = team conventions, committed (e.g. "always allow
-  `npm test`, never allow `npm publish`")
-- `localProject` = my-machine personal overrides per repo (gitignored)
+- `user` = personal preferences across all projects (`prefix:git status`, etc.)
+- `sharedProject` = team conventions, committed (e.g. "always allow `npm test`, never allow `npm publish`")
+- `localProject` = my-machine personal overrides per repo
 - `session` = "remember for this chat only"
-- No `policySettings` tier — Crest isn't enterprise-managed today.
+- No `policySettings` enterprise tier — Crest isn't enterprise-managed today.
 
-### 3.3 Two orthogonal axes — Mode vs Permission Posture
+---
 
-**Decision:** Treat **mode** and **permission posture** as two
-separate, independently-toggleable axes. This is the bigger lesson
-from Claude Code's design: permissions are not the same concept as
-"what kind of work am I doing." Lumping `bypassPermissions` next to
-`ask`/`plan`/`do` in a single mode picker confuses both axes — `ask`
-is a *work mode*, `bypassPermissions` is a *permission posture*.
+## 5. Posture (the strictness axis)
 
-| Axis | Values | What it controls | How user changes it |
-|---|---|---|---|
-| **Mode** | `ask`, `plan`, `do` (+ hidden `bench`) | Tool list, system prompt, step budget — i.e. *what kind of work* the agent is doing | Mode picker UI / `:ask`/`:plan`/`:do` prefix |
-| **Posture** | `default`, `acceptEdits`, `bypassPermissions` (+ hidden `bench` for eval) | *How strictly* tool calls are approved | `Shift+Tab` cycles / `/permission` command |
+**Three user-facing values + one hidden:**
 
-The two are orthogonal. The agent overlay shows both — e.g.
-`do · default permissions` or `do · bypass`.
-
-#### Modes (the work axis)
-
-| Mode | Tools | Default behavior on no rule match | Visible | Audience |
+| Posture | Behavior on calls the rules don't match | Bypass-immune safety | New-chat default? | Audience |
 |---|---|---|---|---|
-| `ask` | read-only set | allow (reads are safe) | yes | interactive read-only |
-| `plan` | read-only + `write_plan` | reads allowed; mutating tools refused at tool-side | yes | interactive planning |
-| `do` | full mutation set | ask (or auto, depending on posture) | yes | interactive coding (default) |
-| `bench` | bench-tuned set, 100-step budget | allow | **no** (API-only) | non-interactive eval harnesses (Harbor/TB2) |
+| `default` | Falls back to per-tool `DefaultBehavior()` (mutations → ask, reads → allow) | fires | no | cautious users / unfamiliar repo |
+| `acceptEdits` | Auto-allow file-edit tools (`edit_text_file`, `write_text_file`, `multi_edit`) when target path is inside `cwd`. Other tools fall through to `default`. | **fires** (can't auto-allow `.env`/`.git/`/`.ssh/` etc.) | **yes** | iterative coding (the bundled default) |
+| `bypass` | Auto-allow everything | **fires** | no | "trust me" / inside a sandbox |
+| `bench` | Auto-allow everything | **off** | no — eval-only, API-activated | non-interactive eval (Harbor/TB2) |
 
-`bench` stays a top-level mode rather than collapsing into a posture
-of `do` because it carries different *budgets* (100 steps vs 40) and
-a different *tool list* (no UI-only tools that can't work headless).
-It also implies a special posture (no checks at all). Harbor adapter
-posts `mode: "bench"` unchanged — backward-compatible.
+**Why `acceptEdits` is the bundled default** — diverging from Claude Code's `default` default:
 
-#### Permission Postures (the strictness axis)
+- Clicking through every `edit_text_file` during interactive coding is the #1 friction in current usage.
+- Risk is bounded: file edits get a `filebackup.MakeFileBackup` snapshot before write; the mtime tracker (commit `0ce9f60b`) refuses edits to files that changed externally; bypass-immune paths still prompt; `shell_exec` still prompts; deny rules still fire.
+- `default` posture is one `Shift+Tab` away when the user wants strict control.
+- Claude Code's audience includes high-stakes shared environments. Crest is a personal terminal for local coding — `acceptEdits` matches that.
 
-| Posture | Behavior on calls the rules don't match | Bypass-immune safety checks | New-chat default? | Audience |
-|---|---|---|---|---|
-| `default` | Fall back to mode default (`do` → ask, `ask` → allow, etc.) | n/a (rules-only) | no | the agent asks before every mutation — for cautious users or when working in unfamiliar repos |
-| `acceptEdits` | Auto-allow **file-edit tools** (`edit_text_file`, `write_text_file`, `multi_edit`) when the target path is inside `cwd`. Everything else falls through to the `default` behavior. | **fire** (won't auto-allow edits to `.env`, `.git/`, `.ssh/`, etc.) | **yes** | iterative file work — let the agent rewrite my code without clicking every diff, but keep shell prompts |
-| `bypassPermissions` | Auto-allow everything | **fire** (`.git/`, `.ssh/`, `.env`, `rm -rf /`, `curl|sh`, `sudo`) | no | "trust me" — let the agent run without clicking every prompt |
-| `bench` | Auto-allow everything | **off** | no — eval-only, not user-selectable | non-interactive eval; activated implicitly by `mode: "bench"` |
+**Posture state lives per-chat** in the session. New chats start in the user's `defaultPosture` setting (defaults to `acceptEdits`). User flips per-chat with `Shift+Tab` (cycles `default → acceptEdits → bypass → default`) or `/permissions` to open the chooser.
 
-Posture state lives **per-chat** in the session. New chats start in
-the user's `defaultPosture` setting, which **ships set to
-`acceptEdits`** for new installs. The user flips per-chat with
-`Shift+Tab` (cycles `default` → `acceptEdits` →
-`bypassPermissions` → `default`, matching Claude Code's cycle minus
-the `plan` step we already split out into the mode axis) or
-`/permission` (opens the chooser, including a "set as default for
-new chats" checkbox).
+**`bench` posture** is privileged — only set when the API receives `mode: "bench"` (Harbor's existing convention). Never user-selectable. Skips bypass-immune safety entirely so eval harnesses get clean signal. This is the only place `mode` still appears in the system, and only as an API alias for "set posture to bench."
 
-**Why `acceptEdits` is the bundled default — diverging from Claude
-Code's `default` default:** clicking through every `edit_text_file`
-during interactive coding is the #1 friction in current usage. The
-risk is bounded:
+---
 
-- File edits get a `filebackup.MakeFileBackup` snapshot before write
-  (existing in `multi_edit.go` etc.) — clobber recovery is a
-  one-liner.
-- The new file mtime tracker (shipped in `0ce9f60b`) refuses edits
-  to files that changed externally since the agent's last read, so
-  the agent can't silently overwrite a user's concurrent change.
-- Bypass-immune paths (`.env`, `.git/`, `.ssh/`, `credentials*`)
-  still prompt — the catastrophic file edits still get a click-gate.
-- `shell_exec` (the truly dangerous tool) still prompts by default
-  — only file edits are auto-allowed.
-- Deny rules still fire — anything explicitly in the deny list is
-  still blocked regardless of posture.
+## 6. Bypass-immune safety list
 
-The cautious `default` posture is one Shift+Tab away when the user
-wants it; the burdensome path shouldn't be the bundled default.
+The `acceptEdits` and `bypass` postures auto-approve calls the rules don't match — but a fixed safety list overrides that and forces a prompt regardless. `bench` posture skips this list entirely.
 
-Claude Code ships with `default` as default partly because their
-audience includes high-stakes shared environments (terminals on
-production servers, etc.). Crest is a personal terminal, used
-overwhelmingly for local coding work — `acceptEdits` matches that
-audience.
+- **`shell_exec`:**
+  - `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`
+  - `git push --force` to `main`/`master`
+  - anything containing `curl | sh` / `wget | sh`
+  - fork-bomb patterns (`:(){:|:&};:` and obvious siblings)
+  - `prefix:sudo`
+- **File tools** (`edit_text_file`, `write_text_file`, `multi_edit`):
+  - writes to `.git/`, `.crest/`, `.ssh/`, `.aws/`, `.gnupg/`
+  - OS shell configs (`.bashrc`, `.zshrc`, `.profile`, `.bash_profile`)
+  - `.env*`
+  - files containing `credentials` or `secret` in the name
+- **`web_fetch` / `browser.navigate`:** deferred — `localhost` / `127.0.0.1` on common dev ports is a footgun for legitimate local-server debugging. Add when we see an incident.
 
-The overlay status indicator displays the current posture so the
-user always knows what they're in.
+Safety checks emit an `ask` decision with reason `"safetyCheck"`. The prompt UI explains why the looser posture was overridden so the user isn't surprised by a sudden approval prompt mid-stream.
 
-**Posture × Mode interaction:** posture only changes behavior for
-calls the rule engine would otherwise *ask* about. In `ask` mode
-everything is reads → already auto-allowed → posture is a no-op. In
-`plan` mode mutating tools are refused regardless of posture
-(plan-mode tool restriction is bypass-immune). The posture really
-matters in `do` mode, which is where users spend most of their time.
+---
 
-**The `acceptEdits` rationale:** the most common pain point in
-interactive use is clicking through every `edit_text_file` while the
-agent iterates on code. `acceptEdits` solves that without giving up
-shell-command safety — the agent can rewrite your files freely but
-must still ask before running anything. Bypass-immune file paths
-(`.env`, `.git/`, `.ssh/`, files containing `credentials`/`secret`)
-still prompt even in `acceptEdits` so the agent can't accidentally
-overwrite something dangerous.
+## 7. Decision pipeline
 
-#### Per-mode rules
+```
+Decide(req {ToolName, Input, ChatId, Cwd, Posture}):
 
-There is **one unified rule pool**, not per-mode rule namespaces.
-Same rule set evaluated under any mode. Modes set the *default
-behavior* when no rule matches; rules override either way. Rationale:
-per-mode rule lists double the user-facing surface and create
-confusion ("why doesn't my `npm install` rule work — oh, I'm in
-`plan` mode"). Matches Claude's design.
+  1. Posture == bench?
+     → Decision{Allow, reason=posture-bench, bypassImmune=false}
+     (eval-only escape; skips safety entirely)
 
-#### Why the separation matters
+  2. Load rules from all scopes for (chat=ChatId, cwd=Cwd)
+     → flat []Rule sorted by (scope precedence desc, content specificity desc)
 
-- **Composability.** A user can flip into `bypassPermissions` and
-  back without disturbing the agent's current work — the tool list,
-  prompt, and budget all stay constant; only the approval strictness
-  changes. With the previous (lumped) design, the user had to switch
-  *modes* — losing budget continuity, tool availability, etc.
-- **UI clarity.** Mode picker is a short list of qualitatively
-  different work modes. Posture toggle is a 2-state knob with clear
-  safety implications. Two axes, two affordances.
-- **Settings layout.** `defaultMode` and `defaultPosture` are
-  separate config keys; users can independently set per-axis defaults
-  (e.g. "default mode = do, default posture = bypass on this trusted
-  machine").
+  3. Tool-level deny rule (Content == "")?
+     → Decision{Deny, reason=rule}
 
-#### Wire format updates
+  4. Content-specific Deny or Ask rule match?
+     - run tool.MatchContent(input, rule) for each rule with non-empty
+       Content where Behavior is Deny or Ask
+     - first match (highest precedence) wins
+     - Allow rules are intentionally NOT matched here — they wait
+       until step 6 so safety can run first
+     → Decision{rule.Behavior, reason=rule}
 
-Backend request body grows a new optional field:
+  5. Per-tool safety check (bypass-immune)?
+     - file tools: target path matches bypass-immune list → ask{safetyCheck, bypassImmune=true}
+     - shell_exec: command matches bypass-immune list → same
+     - default: passthrough
+     → if non-passthrough, return that decision (ignores posture in step 7)
 
-```jsonc
-// POST /api/post-agent-message
-{
-  "mode": "do",                          // ask | plan | do | bench
-  "permissionPosture": "acceptEdits",    // default | acceptEdits | bypassPermissions | bench
-                                         // (omittable; falls back to settings.defaultPosture, then to "acceptEdits")
-  // ... existing fields
+  6. Allow rule match?
+     a. Tool-level allow (Content == "") → Decision{Allow, reason=rule}
+     b. Content-specific allow → Decision{Allow, reason=rule}
+
+  7. Posture-driven default for unmatched calls:
+     a. posture == bypass → Decision{Allow, reason=posture-bypass}
+     b. posture == acceptEdits AND tool is a file-edit AND target inside cwd
+        → Decision{Allow, reason=posture-acceptEdits}
+     c. posture == default → fall through
+
+  8. Per-tool default behavior:
+     - file-edit tools default to ask
+     - shell_exec defaults to ask
+     - read tools default to allow
+     - web_fetch / browser defaults to ask
+     → Decision{tool.DefaultBehavior(), reason=default}
+
+  9. Behavior == Ask?
+     - tool.SuggestRules(input) populates Decision.Suggestions
+     - return for UI to prompt user
+
+ 10. Behavior == Allow/Deny? return immediately, no prompt.
+```
+
+**Step 1** is the only Mode-derived special case left, and it's renamed to `posture == bench` to match the new vocabulary.
+
+**Step 4 splits Allow out for safety reasons.** Letting a content-specific Allow short-circuit before step 5 would let a rule like `shell_exec(prefix:echo)` auto-approve `echo \`rm -rf /\`` — the safety substring matcher never gets a chance to evaluate the inner command. Splitting Deny/Ask (which short-circuit before safety, the conservative direction) from Allow (which sits below safety) preserves the intent without ordering surprises.
+
+**Step 5** runs *before* every Allow path (step 6 tool-level + content-specific, step 7 posture auto-allow) so safety wins over `acceptEdits` and `bypass` postures and over user-supplied Allow rules alike.
+
+**Step 6/7 ordering:** explicit Allow rules win over posture defaults so a user-added `shell_exec(prefix:npm)` allow rule beats whatever the posture would do.
+
+---
+
+## 8. Architecture (code)
+
+### 8.1 Package layout
+
+```
+pkg/agent/permissions/         (new package)
+├── permissions.go             // Engine, Decide, types
+├── rule.go                    // Rule, ParseRule, Match
+├── matcher_glob.go            // gitignore-style globs (use github.com/sabhiram/go-gitignore)
+├── matcher_prefix.go          // prefix:<...> shell-command matching
+├── safety.go                  // SafetyCheck, BypassImmuneList
+├── store.go                   // RuleStore: load/save/scope precedence
+├── store_session.go           // In-memory session scope
+├── store_settings.go          // wconfig-backed user/project scopes
+└── permissions_test.go
+```
+
+Top-level package because the engine is reusable beyond the agent (future REPL, future MCP-only flows). Tools call into it via a small interface to avoid a package cycle.
+
+### 8.2 Core types
+
+```go
+// pkg/agent/permissions/permissions.go
+
+type Decision struct {
+    Behavior     RuleBehavior  // "allow" | "deny" | "ask"
+    Reason       DecisionReason
+    Rule         *Rule          // populated when Behavior decided by a rule
+    Suggestions  []Rule         // populated only when Behavior == Ask
+    UpdatedInput map[string]any // tool-modified input (rare)
+}
+
+type DecisionReason struct {
+    Kind         string  // "rule" | "tool" | "safetyCheck" | "posture" | "default"
+    Detail       string
+    BypassImmune bool    // true for safety checks; false otherwise
+}
+
+type CheckRequest struct {
+    ToolName string
+    Input    map[string]any
+    ChatId   string  // for session-scope rules
+    Cwd      string  // for project-scope rule loading
+    Posture  string  // "default" | "acceptEdits" | "bypass" | "bench"
+}
+
+type Engine interface {
+    Decide(ctx context.Context, req CheckRequest) Decision
+    PersistRules(ctx context.Context, scope RuleScope, rules []Rule) error
+    LoadRulesForChat(ctx context.Context, chatId, cwd string) ([]Rule, error)
 }
 ```
 
-For backward compatibility, `mode: "bench"` is accepted as shorthand
-for `mode: "bench", permissionPosture: "bench"` (the only way to set
-the bench posture). Harbor adapter needs no changes.
+Note: no `Mode` field on `CheckRequest`. The only place mode survives is the API-side aliasing of `mode: "bench"` to `posture: "bench"`.
 
-### 3.4 UI surface
+### 8.3 Tool integration — `PermissionAdapter`
 
-**Decision:** Three surfaces — approval prompt, posture toggle, and
-settings rule list.
+```go
+// pkg/aiusechat/uctypes/uctypes.go (extension to ToolDefinition)
+type ToolDefinition struct {
+    // ... existing fields
+    Permissions PermissionAdapter  // optional; nil for tools w/o per-call logic
+}
 
-#### 3.4.0 Posture toggle
+type PermissionAdapter interface {
+    MatchContent(input map[string]any, pattern string) bool
+    CheckSafety(input map[string]any) SafetyResult  // bypass-immune check
+    SuggestRules(input map[string]any) []SuggestedRule
+    DefaultBehavior() string  // "allow" | "ask" | "deny"
+    IsFileEdit() bool         // for posture acceptEdits handling
+    TargetPath(input map[string]any) string  // for path-relative-to-cwd checks
+}
 
-The mode picker UI lists the three work modes (`ask`/`plan`/`do`).
-Permission posture is a separate affordance:
+type SafetyResult struct {
+    Triggered bool
+    Reason    string  // human-readable, shown in the prompt
+}
+```
 
-- **Status pill** in the agent overlay header, e.g.
-  `do · permissions: default` (clickable to open `/permission`).
-  Color-coded: neutral for `default`, info for `acceptEdits`,
-  warning for `bypassPermissions` so the user always knows when
-  they're in a looser posture.
-- **Shift+Tab** keybinding cycles posture
-  (`default` → `acceptEdits` → `bypassPermissions` → `default`).
-  Matches Claude Code's cycle minus the `plan` step we already split
-  out into the mode axis. Only active when the agent overlay has
-  focus.
-- **`/permission`** slash command opens a chooser dialog with the
-  three postures + a brief explanation of each. Also offers a link
-  to the rules editor and a checkbox for "set as default for new
-  chats" (writes to `ai:permissions.defaultPosture`).
-- **Persistence:** posture is a per-chat state (resets on new chat).
-  Default posture for new chats is read from
-  `ai:permissions.defaultPosture` (defaults to `default`).
+Why duplicate the interface in `uctypes`? The pure permissions package can't import `pkg/agent/tools` without a cycle. `uctypes` defines the contract; `pkg/agent/permissions` adapts it.
 
-#### 3.4.1 Approval prompt with suggestions
+Existing tool factories in `pkg/agent/tools/*.go` add a `PermissionAdapter` — most are 20-line implementations.
 
-Today: two buttons (Approve / Deny). New (matches Claude's prompt):
+### 8.4 Replacing the existing approval flow
+
+Today's flow:
+```
+processToolCallInternal (usechat.go)
+  → toolCall.ToolUseData.Approval already set by registry.go (mode.ResolveApproval)
+  → if NeedsApproval: WaitForToolApproval
+```
+
+New flow (using the BeforeToolHook pipeline shipped in commit "D"):
+```
+processToolCallInternal
+  → engine.Decide(req) → Decision
+  → switch Decision.Behavior:
+     - Allow: set Approval=AutoApproved, run
+     - Deny:  set status=Error("denied: " + reason), skip run
+     - Ask:   set Approval=NeedsApproval, attach Decision.Suggestions
+              for the FE; WaitForToolApproval; on user-approve, persist
+              any selected suggestions via engine.PersistRules
+```
+
+**`engine.Decide` is registered as a global `BeforeToolHook`** on `WaveChatOpts.BeforeToolHooks` at agent setup. The hook returns `nil` for Allow (proceed), an error `*AIToolResult` for Deny, or signals "need approval" via the existing `RegisterToolApproval` mechanism.
+
+`mode.ResolveApproval` in `pkg/agent/registry.go` is **gone**. The whole `pkg/agent/modes.go` file goes away — replaced by:
+- `pkg/agent/permissions` (new)
+- A small system-prompt seeder in `pkg/agent/prompts.go` that picks the right base prompt (no longer keyed by mode name; just one default + user overrides via SYSTEM.md)
+
+### 8.5 Settings schema
+
+```go
+// pkg/wconfig/types.go (extension)
+type SettingsType struct {
+    // ... existing
+    AIPermissions *AIPermissionsConfig `json:"ai:permissions,omitempty"`
+}
+
+type AIPermissionsConfig struct {
+    Allow          []string `json:"allow,omitempty"`          // "shell_exec(prefix:npm)"
+    Deny           []string `json:"deny,omitempty"`
+    Ask            []string `json:"ask,omitempty"`
+    DefaultPosture string   `json:"defaultPosture,omitempty"` // "default"|"acceptEdits"|"bypass". Defaults to "acceptEdits".
+}
+```
+
+Project-shared rules at `<cwd>/.crest/permissions.json`; per-user-per-project at `<cwd>/.crest/permissions.local.json`. Same JSON shape.
+
+### 8.6 Frontend
+
+- **Status pill** in agent overlay header: `permissions: acceptEdits` (clickable to open `/permissions`). Color-coded: neutral `default`, info `acceptEdits`, warning `bypass`.
+- **`Shift+Tab`** keybinding cycles posture (`default → acceptEdits → bypass → default`) when overlay has focus.
+- **`/permissions`** opens chooser with the three postures + brief explanation of each, plus a link to the rules editor and "set as default for new chats" checkbox.
+- **Approval prompt** extends `term-agent.tsx` `TermAgentApprovalButtons` with suggestion list and destination picker:
 
 ```
 ┌────────────────────────────────────────────────────────────┐
@@ -385,299 +450,11 @@ Today: two buttons (Approve / Deny). New (matches Claude's prompt):
 └────────────────────────────────────────────────────────────┘
 ```
 
-The suggestions come from the tool's `SuggestRules(input)` method.
-Each tool implements its own suggestion logic (e.g. `shell_exec`
-suggests prefix-based, exact, and tool-wide; `edit_text_file`
-suggests parent-dir glob, exact-path, and tool-wide).
-
-Save destinations:
-- **Session** — in-memory, lasts until chat ends
-- **This project** — `localProject` scope (gitignored)
-- **Always** — `user` scope (~/.config)
-
-Implementation: extend the existing `term-agent.tsx`
-`TermAgentApprovalButtons` component. The existing wshrpc command
-that sends approval back already exists; we extend the payload to
-include suggested rules and destination.
-
-#### 3.4.2 Settings rule editor
-
-Crest has a Settings panel for AI providers; add a "Permissions" tab.
-List all rules across all scopes, grouped by scope, with edit/delete
-actions. Settings already round-trips through `wconfig` so writes are
-covered.
-
-(For v1 we can ship with read-only rule list; full editor in a
-follow-up. The session-prompt-with-suggestions covers 80% of UX.)
-
-### 3.5 Bypass-immune safety check list
-
-The `acceptEdits` and `bypassPermissions` postures auto-approve calls
-the rules don't match — but a fixed safety list overrides that and
-forces a prompt regardless. `bench` posture (eval-only, no user to
-prompt) skips this list entirely.
-
-- **`shell_exec`:** `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`,
-  `git push --force` to `main`/`master`, anything containing
-  `curl | sh` / `wget | sh`, fork-bomb patterns (`:(){:|:&};:` and
-  obvious siblings), `prefix:sudo`.
-- **File tools** (`edit_text_file`, `write_text_file`, `multi_edit`):
-  writes to `.git/`, `.crest/`, `.ssh/`, `.aws/`, `.gnupg/`, OS shell
-  configs (`.bashrc`, `.zshrc`, `.profile`, `.bash_profile`), `.env*`,
-  files containing `credentials` or `secret` in the name.
-- **`web_fetch` / `browser.navigate`:** URLs with `localhost` /
-  `127.0.0.1` on common dev ports — defer to v2; can be a footgun for
-  local dev where the agent is helping debug a server.
-
-Safety checks emit an `ask` decision with reason `"safetyCheck"`. The
-prompt UI explains why the looser posture was overridden so the user
-isn't surprised by a sudden approval prompt mid-stream.
+Suggestions come from `tool.SuggestRules(input)`. `wshrpc agent:tool-approve` payload extends with `acceptedSuggestions: Rule[]` and `destination: RuleScope`.
 
 ---
 
-## 4. Architecture
-
-### 4.1 Package layout
-
-```
-pkg/agent/permissions/         (new package)
-├── permissions.go             // Engine, Decide, types
-├── rule.go                    // Rule, ParseRule, Match
-├── matcher_glob.go            // gitignore-style globs (use github.com/sabhiram/go-gitignore)
-├── matcher_prefix.go          // prefix:<...> shell-command matching
-├── safety.go                  // SafetyCheck, BypassImmuneList
-├── store.go                   // RuleStore: load/save/scope precedence
-├── store_session.go           // In-memory session scope
-├── store_settings.go          // wconfig-backed user/project scope
-└── permissions_test.go
-```
-
-Why a new top-level package: keeps the engine reusable beyond the
-agent (e.g. future REPL mode, future MCP-only flows). Today's modes.go
-imports it; tools call into it via a small interface to avoid a
-package cycle.
-
-### 4.2 Core types
-
-```go
-// pkg/agent/permissions/permissions.go
-
-type Decision struct {
-    Behavior  RuleBehavior  // "allow" | "deny" | "ask"
-    Reason    DecisionReason
-    Rule      *Rule          // populated when Behavior decided by a rule
-    Mode      string         // populated when Behavior decided by mode
-    Suggestions []Rule       // populated only when Behavior == Ask
-    UpdatedInput map[string]any // tool-modified input (rare)
-}
-
-type DecisionReason struct {
-    Kind   string  // "rule" | "mode" | "tool" | "safetyCheck" | "default"
-    Detail string
-    BypassImmune bool // safety checks: true; everything else false
-}
-
-type CheckRequest struct {
-    ToolName string
-    Input    map[string]any
-    ChatId   string  // for session-scope rules
-    Cwd      string  // for project-scope rule loading
-    Mode     string  // current mode name (ask/plan/do/bench)
-    Posture  string  // current permission posture (default/acceptEdits/bypassPermissions/bench)
-}
-
-type Engine interface {
-    Decide(ctx context.Context, req CheckRequest) Decision
-    PersistRules(ctx context.Context, scope RuleScope, rules []Rule) error
-    LoadRulesForChat(ctx context.Context, chatId, cwd string) ([]Rule, error)
-}
-```
-
-### 4.3 Decision pipeline
-
-Mirrors Claude Code's `hasPermissionsToUseToolInner` order. The
-**mode** axis is consulted first (it can hard-deny mutating tools in
-`plan`); then **rules**; then **per-tool safety checks**; then the
-**posture** axis fills in unmatched cases. Bypass-immune safety wins
-over any posture.
-
-```
-Decide(req):
-  0. Mode-side hard refusal:
-     - plan mode + tool is mutating → Decision{Deny, reason=mode-plan}
-     (matches Claude's plan-mode read-only enforcement)
-
-  1. Load rules from all scopes for (chat=req.ChatId, cwd=req.Cwd)
-     → flat []Rule sorted by (scope precedence desc, content specificity desc)
-
-  2. Tool-level deny?
-     - any rule where ToolName matches and Content == "" and Behavior == Deny
-     → Decision{Deny, reason=rule}
-
-  3. Content-specific rule match (across all scopes)?
-     - run tool.MatchContent(input, rule) for each rule with non-empty Content
-     - first match (highest precedence) wins
-     → Decision{rule.Behavior, reason=rule}
-
-  4. Per-tool CheckPermissions (safety checks)?
-     - file tools: bypass-immune paths → ask{safetyCheck, bypassImmune=true}
-     - shell_exec: bypass-immune commands → same
-     - default: passthrough
-     → if non-passthrough, return that decision (immune to posture overrides)
-
-  5. Tool-level allow rule?
-     → Decision{Allow, reason=rule}
-
-  6. Posture-driven default for unmatched calls:
-     a. posture == bench → Decision{Allow, reason=posture-bench}
-     b. posture == bypassPermissions → Decision{Allow, reason=posture-bypass}
-     c. posture == acceptEdits AND tool is a file-edit AND target inside cwd
-        → Decision{Allow, reason=posture-acceptEdits}
-     d. posture == default → fall through
-
-  7. Mode default:
-     - ask mode → reads default Allow, anything else default Ask
-     - do mode → mutations default Ask, reads default Allow
-     → Decision{tool.DefaultBehavior, reason=default}
-
-  8. Behavior == Ask?
-     - tool.SuggestRules(input) populates Decision.Suggestions
-     - return for UI to prompt user
-
-  9. Behavior == Allow/Deny? return immediately, no prompt.
-```
-
-Step 4 runs *before* posture-driven auto-allow (step 6) so safety
-checks remain bypass-immune in `acceptEdits` and `bypassPermissions`.
-Step 0 runs first because plan-mode refusal is a property of the work
-mode, not the permission system — a `bypassPermissions` posture
-shouldn't unlock writes in `plan`.
-
-### 4.4 Tool integration — `PermissionedTool` interface
-
-```go
-// pkg/agent/permissions/tool_iface.go
-type PermissionedTool interface {
-    // MatchContent returns true if the rule's Content pattern matches
-    // this specific tool input. Empty Content matches anything.
-    MatchContent(input map[string]any, content string) bool
-
-    // CheckPermissions runs tool-specific safety logic before the rule
-    // engine's mode-based step. Most tools return Passthrough.
-    CheckPermissions(input map[string]any) Decision
-
-    // SuggestRules returns rule patterns that would auto-allow this
-    // exact call in the future. Ordered most-specific to least.
-    SuggestRules(input map[string]any) []Rule
-
-    // DefaultBehavior is the fallback when no rule matches and no
-    // mode posture applies.
-    DefaultBehavior() RuleBehavior
-}
-```
-
-Existing tool factories in `pkg/agent/tools/*.go` add these methods.
-The `ToolDefinition` struct gets one new field:
-
-```go
-// pkg/aiusechat/uctypes/uctypes.go
-type ToolDefinition struct {
-    // ... existing fields
-    Permissions PermissionAdapter  // optional; nil for tools w/o per-call logic
-}
-
-type PermissionAdapter interface {
-    MatchContent(input map[string]any, pattern string) bool
-    CheckPermissions(input map[string]any) (behavior, reason string, bypassImmune bool)
-    SuggestRules(input map[string]any) []SuggestedRule
-}
-```
-
-(Why duplicate the interface in `uctypes`? The pure permissions
-package can't import `pkg/agent/tools` without a cycle. We define
-the contract in `uctypes` and adapt it in `pkg/agent/permissions`.)
-
-### 4.5 Replacing the existing approval flow
-
-Today's flow:
-```
-processToolCallInternal (usechat.go)
-  → toolCall.ToolUseData.Approval already set by registry.go
-  → if NeedsApproval: WaitForToolApproval
-```
-
-New flow:
-```
-processToolCallInternal
-  → engine.Decide(req) → Decision
-  → switch Decision.Behavior:
-     - Allow: set Approval=AutoApproved, run
-     - Deny: set status=Error("denied: " + reason), skip run
-     - Ask: set Approval=NeedsApproval, attach Decision.Suggestions
-            for the FE; WaitForToolApproval; on user-approve, persist
-            any selected suggestions via engine.PersistRules
-```
-
-The `mode.ResolveApproval` call in `pkg/agent/registry.go` is **gone**.
-Modes are now consulted by the engine, not pre-baked into approval
-strings at registration time.
-
-### 4.6 Settings schema
-
-```go
-// pkg/wconfig/types.go (extension)
-type SettingsType struct {
-    // ... existing
-    AIPermissions *AIPermissionsConfig `json:"ai:permissions,omitempty"`
-}
-
-type AIPermissionsConfig struct {
-    Allow          []string `json:"allow,omitempty"`          // "shell_exec(prefix:npm)"
-    Deny           []string `json:"deny,omitempty"`
-    Ask            []string `json:"ask,omitempty"`
-    DefaultMode    string   `json:"defaultMode,omitempty"`    // "ask"|"plan"|"do" — bench is API-only. Defaults to "do".
-    DefaultPosture string   `json:"defaultPosture,omitempty"` // "default"|"acceptEdits"|"bypassPermissions". Defaults to "acceptEdits".
-}
-```
-
-Project-shared rules live at `<cwd>/.crest/permissions.json` (committed
-to the repo); per-user-per-project overrides live at
-`<cwd>/.crest/permissions.local.json` (gitignored). Same JSON shape as
-the `ai:permissions` block above.
-
-### 4.7 Frontend — approval prompt extension
-
-Existing component: `frontend/app/view/term/term-agent.tsx`,
-`TermAgentApprovalButtons`.
-
-New props:
-```ts
-interface ApprovalProps {
-    toolCallId: string
-    toolName: string
-    suggestions: SuggestedRule[]   // from Decision.Suggestions
-    defaultDestination: 'session' | 'localProject' | 'user'
-}
-```
-
-New buttons: existing Approve/Deny → "Approve and Remember" picker
-with destination dropdown. New wshrpc command
-`agent:tool-approve` carries optional `acceptedSuggestions: Rule[]`
-and `destination: RuleScope` fields.
-
----
-
-## 5. Migration & Rollout
-
-### 5.1 Existing chats
-
-The `ApprovalPolicy` struct on `Mode` becomes a *seed* rule set, not a
-runtime policy. On first load, modes that had `RequireApproval`/`AutoApproveTools`
-maps emit equivalent rules into the session scope so behavior is
-identical out of the box. Users who never touch the new settings see
-the same UX they have today.
-
-### 5.2 Default rules shipped
+## 9. Default rules shipped (in-binary)
 
 ```
 allow:
@@ -693,8 +470,10 @@ allow:
   - shell_exec(prefix:git log)
   - shell_exec(prefix:ls)
   - shell_exec(prefix:pwd)
-  - shell_exec(prefix:cat)        # informational reads only
-  - shell_exec(prefix:echo)
+  # NOT included: prefix:cat, prefix:echo. cat would auto-approve
+  # `cat ~/.ssh/id_rsa` / `cat .env`; echo + shell substitution
+  # (`echo $(rm -rf /)`) sneaks past the safety substring matcher.
+  # `read_text_file` covers safe file reads with proper hooks.
 
 deny:
   - shell_exec(prefix:sudo)
@@ -708,119 +487,129 @@ deny:
   - edit_text_file(**/credentials*)
   - edit_text_file(**/.ssh/**)
 
-ask:                                # nothing — handled by mode default
+ask: (nothing — handled by per-tool DefaultBehavior)
 ```
 
-These ship as in-binary defaults (lowest precedence, below `session`)
-so the user can override any one. They only become "real" rules in
-settings.json when the user persists a change via the UI.
-
-### 5.3 Implementation order
-
-1. **Types + parser** — `pkg/agent/permissions/{rule,permissions}.go`
-   types (Rule, RuleBehavior, Posture, CheckRequest, Decision),
-   ParseRule/Stringify, unit tests for the grammar.
-2. **Matchers** — glob (path), prefix (shell), exact. Unit tests.
-3. **RuleStore** — load/save settings.json; precedence walk; project
-   file loading. Unit tests.
-4. **Engine.Decide** — full pipeline including posture handling and
-   the Step 0 plan-mode hard refusal. Unit tests against a fixture
-   rule set covering each posture × mode combination.
-5. **Tool adapters** — implement `PermissionAdapter` for `shell_exec`,
-   `edit_text_file`, `multi_edit`, `write_text_file`, `read_text_file`,
-   `web_fetch`, `browser.*`, `spawn_task`. Each with `SuggestRules`
-   and (for file-edit tools) an `IsFileEdit() bool` flag so
-   `acceptEdits` posture knows what to auto-allow.
-6. **Wire into usechat.go** — replace `mode.ResolveApproval` call with
-   `engine.Decide(req)`. Add `Posture` field to `Session` (per-chat
-   state). API endpoint accepts `permissionPosture` field, defaulting
-   to `settings.defaultPosture` then to `"default"`. Bench-mode test
-   parity (Harbor still works unchanged).
-7. **Frontend prompt** — extend `TermAgentApprovalButtons` with
-   suggestions list and destination picker. New wshrpc payload.
-8. **Settings UI** — read-only rule list under a new "Permissions"
-   tab. (Editor in a follow-up.)
-9. **Default rules** — bundle the v5.2 list into the engine's
-   `inBinaryRules` source, lowest precedence.
-10. **Documentation** — update `claude-code-parity.md` §3 status,
-    write a short user-facing guide on how rules work.
-
-Estimated: 2 sittings to step 6 (functional parity with mode behavior
-+ rules), 1 more sitting for steps 7-10 (UI polish + defaults).
+These ship as in-binary defaults at the lowest precedence, below `session`. The user can override any one. They only become "real" persisted rules when the user changes them via the UI.
 
 ---
 
-## 6. Decisions Log (v1 specific)
+## 10. What replaces Mode
+
+The previous Mode axis bundled three things (tool subset, system prompt, default approval policy). After v2 they map roughly as follows:
+
+| Old: Mode value | New: how to get equivalent behavior |
+|---|---|
+| `ask` (read-only Q&A) | Launch with `--tools read,grep,find,ls`. **Or** add session deny rules: `deny edit_text_file(*)` etc. **Or** set posture `default` and let the agent get refused per-call. |
+| `plan` (propose-first) | **Open question — deferred.** v2 does not ship a replacement for plan mode. The bundled system prompt does not change. Users who relied on plan mode will currently have no first-class equivalent. Whether to add one (slash command, system-prompt opt-in, dedicated posture, or something else) is a separate design conversation. |
+| `do` (full agent) | Default. Posture `acceptEdits` (the bundled default). |
+| `bench` (eval harness) | Stays. API-only. POST `mode: "bench"` to the agent endpoint → backend forces posture to `bench`. Hidden from user-facing UI. |
+
+**No `/plan` slash command, no prompt template system.** Pi's argument: every prompt-template system fails the 90/10 test (90% of users never use it; 10% have 5 own flows it doesn't cover). The combination of `@filename` references + `SYSTEM.md` covers the 10% case without the slash machinery.
+
+This explicitly leaves a gap where `plan` mode used to live. v2 permissions does not try to fill it. The shipped system prompt stays as-is; we are not adding "propose a plan first" guidance to SYSTEM.md as part of this work. If plan-mode loss turns out to be a real problem, the fix is a follow-up design — possibly a posture, possibly something else — informed by actual usage data, not preemptively baked into the default prompt.
+
+**Slash commands that survive** are control-flow only:
+- `/permissions` — view rules, change posture
+- `/model` — switch model
+- `/clear` — clear chat
+- `/compact` — manual compaction trigger
+- `/login` / `/logout` — OAuth
+- `/share` — export session
+
+These don't touch the next prompt's content. They invoke a function. Different category from `/plan` / `/test` / `/refactor` (which we're cutting).
+
+---
+
+## 11. Migration plan
+
+### 11.1 Existing chats / settings
+
+The `Mode` concept disappears from the public API surface for new clients, but old clients posting `mode: "ask"` etc. need to keep working until FE is updated. Backend translates:
+
+| API receives | Engine treats as |
+|---|---|
+| `mode: "ask"` | (no mode); session-scope deny rules `edit_text_file(*)`, `write_text_file(*)`, `multi_edit(*)`, `shell_exec(*)`. Posture: `default`. |
+| `mode: "plan"` | (no mode); same deny rules as `ask`; posture: `default`. The system prompt is not modified — the "propose-first" semantic that plan mode used to add is not preserved. See §10 (open question). |
+| `mode: "do"` | (no mode); posture: `defaultPosture` setting. |
+| `mode: "bench"` | posture: `bench`; bypass-immune safety off. |
+
+This keeps Harbor unchanged and gives a 1-release window for the FE to drop the mode picker.
+
+### 11.2 Files removed
+
+- `pkg/agent/modes.go` — gone. ApprovalPolicy struct, mode definitions, `ResolveApproval` method all deleted.
+- `pkg/agent/registry.go` — `mode.ResolveApproval` calls deleted; tool registration no longer takes an approval-resolver closure (the engine decides at run time, not registration time).
+
+### 11.3 Files added
+
+- `pkg/agent/permissions/` package (per §8.1)
+- `pkg/wconfig/types.go` — `AIPermissionsConfig` extension
+- `frontend/.../PermissionsPanel.tsx` — `/permissions` UI
+
+### 11.4 Implementation order
+
+1. **Types + parser** — `pkg/agent/permissions/{rule,permissions}.go`. Rule, RuleBehavior, Posture, CheckRequest, Decision. ParseRule/Stringify. Unit tests for the grammar.
+2. **Matchers** — glob (path), prefix (shell), exact. Unit tests.
+3. **RuleStore** — load/save settings.json; precedence walk; project file loading. Unit tests.
+4. **Safety list** — `safety.go` with the §6 patterns hard-coded. Unit tests covering each.
+5. **Engine.Decide** — full pipeline (§7). Unit tests covering each posture × rule-set combination.
+6. **Tool adapters** — implement `PermissionAdapter` for `shell_exec`, `edit_text_file`, `multi_edit`, `write_text_file`, `read_text_file`, `web_fetch`, `browser.*`, `spawn_task`. Each with `SuggestRules`.
+7. **Wire into usechat.go** — register `engine.Decide` as a global `BeforeToolHook` on `WaveChatOpts.BeforeToolHooks` (the hook pipeline from D). Add `Posture` field to `Session` (per-chat state). API endpoint accepts `mode: "bench"` → forces posture to bench. Delete `pkg/agent/modes.go` and `mode.ResolveApproval` callers.
+8. **Frontend prompt** — extend `TermAgentApprovalButtons` with suggestions list and destination picker. New wshrpc payload.
+9. **Settings UI** — read-only rule list under a new "Permissions" tab. (Editor in a follow-up.)
+10. **Default rules** — bundle the §9 list into the engine's `inBinaryRules` source, lowest precedence.
+11. **Documentation** — update `claude-code-parity.md` §3 status, write a short user-facing guide on how rules work, document `--tools` + SYSTEM.md as the substitute for `ask` / `plan` modes.
+
+Estimated: ~3 sittings to step 7 (functional parity + mode removal); 1 more sitting for steps 8-11.
+
+---
+
+## 12. Decisions log
 
 | Decision | Why |
 |---|---|
-| Skip classifier for v1 | Matches user's "ship rules first" call; classifier is a separate >1 sitting lift involving prompt design + Statsig-equivalent gating |
-| **Mode and Posture are orthogonal axes** | Conflating them (single picker with `ask`/`plan`/`do`/`bypassPermissions`) mixes two unrelated concepts. Mode = what work the agent does (tool list, prompt, budget); Posture = how strict approvals are. The user can flip into `bypassPermissions` mid-session without disturbing their work mode. Resolved 2026-04-27 per user direction |
-| Posture set: `default` / `acceptEdits` / `bypassPermissions` (+ hidden `bench`) | Matches Claude Code's permission modes minus `plan` (which is a Crest *mode*, not a posture) and `dontAsk` (niche; defer to v2). `acceptEdits` is the highest-value addition — clicking through every code edit is the #1 friction in interactive use. Resolved 2026-04-27 per user direction |
-| Bundled default posture is `acceptEdits`, not `default` | Diverges from Claude Code (which ships `default` as default). Rationale: Crest's audience is personal local-coding workflows where iterative edits dominate; the cautious `default` posture is one Shift+Tab away. Risk is bounded by file backups (`filebackup.MakeFileBackup`), mtime tracking (commit `0ce9f60b`), bypass-immune paths still prompting (`.env`, `.git/`, `.ssh/`), `shell_exec` still prompting, and deny rules still firing. Resolved 2026-04-27 per user direction |
-| `Shift+Tab` cycles posture | Matches Claude's keybinding. Cycle order: `default` → `acceptEdits` → `bypassPermissions` → `default`. The `/permission` slash command is the alternative for users who don't know the keybinding |
-| `bench` mode + `bench` posture stay implicitly coupled | When the API receives `mode: "bench"`, posture is forced to `bench` regardless of any explicit value. Eval harnesses don't think about posture; they just say "I'm running benchmarks." Backward compatible with Harbor adapter |
-| `bench` hidden from user-facing mode picker (API-only) | A user picking `bench` from a picker would unwittingly disable safety. Harbor/eval is the only legitimate audience and they POST `mode: "bench"` directly. Frontend mode list: `[ask, plan, do]`. Posture toggle is the user-facing knob for strictness. Resolved 2026-04-27 per user direction |
-| No `bypassEnabled` gating flag | Picking a posture IS the consent; gating adds friction without safety value when the destructive paths are already bypass-immune. Resolved 2026-04-27 |
-| Rules in a top-level `pkg/agent/permissions` package | Cleaner cycle story; reusable beyond the agent loop |
-| `PermissionAdapter` lives on `ToolDefinition` (uctypes) | Keeps the engine pure; avoids `permissions → tools → permissions` cycle |
-| In-binary defaults shipped (Allow git-status etc.) | Most users never customize anything; sane defaults set the floor |
-| No CLI rule commands | Settings UI + JSON edit is sufficient; CLI is later polish |
-| One unified rule pool, modes are presets | Mirrors Claude; per-mode rules confuse users |
-| `localProject` is gitignored, `sharedProject` is committed | Standard convention from `.env.local` etc. |
+| **Drop Mode entirely** | Old design bundled three independent things (tool subset, prompt, approval policy). Splitting them — rules, SYSTEM.md, posture — exposes one knob each. Resolved 2026-04-27. |
+| **Keep `bench` as API-only escape** | Eval harnesses (Harbor, TB2) need bypass-immune safety off and don't have a user to prompt. `mode: "bench"` over the API maps to posture `bench`. Never user-selectable. |
+| **No `/plan` / `/ask` / prompt-template slashes** | Per pi-mono. Replaced by `@filename` reference (per-call) and SYSTEM.md (persistent). Saves the surface area of a template registry, conflict resolution, etc. |
+| **Keep utility slashes** (`/permissions`, `/model`, `/clear`, `/compact`) | These invoke functions, not template expansion. Different category. |
+| **Bundled default posture is `acceptEdits`** | Diverges from Claude Code (`default` default). Matches Crest's audience (personal local coding). Risk bounded by file backups, mtime tracking, bypass-immune paths, deny rules, `shell_exec` still prompting. |
+| **`Shift+Tab` cycles posture** | Matches Claude. Cycle: `default → acceptEdits → bypass → default`. |
+| **Three user-facing posture values** | `default`, `acceptEdits`, `bypass`. (`bench` hidden.) Pi has these same three; we adopt for consistency with the wider ecosystem. |
+| **Permissions package at `pkg/agent/permissions`** | Top-level keeps reuse open; adapter interface in uctypes avoids cycle. |
+| **`PermissionAdapter` lives on `ToolDefinition`** | Per-tool content matching + suggestions belong with the tool definition; the engine treats them via interface. |
+| **In-binary default rules shipped** | Covers the 80% case (`git status` etc. always allowed) without forcing every user to configure. Lowest precedence so they're easy to override. |
+| **`localProject` is gitignored, `sharedProject` is committed** | Standard convention from `.env.local` etc. |
+| **One unified rule pool (no per-mode/per-posture rule namespaces)** | Simpler mental model. Mode-specific rules confused users in the prior draft. |
 
 ---
 
-## 7. Open Questions — Resolved
+## 13. Out of scope
 
-All four original questions resolved 2026-04-27, plus a fifth round
-of structural feedback resolved same day:
-
-- **Q1 — bypass mode name and gating.** `bypassPermissions` is the
-  user-facing "trust me" posture (Claude's name). `bench` stays as a
-  separate eval-only construct. **No** gating flag — picking it IS
-  the consent.
-- **Q2 — project rule file location.** `<cwd>/.crest/permissions.json`
-  (shared) and `<cwd>/.crest/permissions.local.json` (gitignored).
-  Matches the `.crest-plans` and `.crest-trajectories` convention.
-- **Q3 — default "save to" destination.** `session` — least
-  commitment; users move up the ladder (project / user) as they learn
-  what they actually want persistent.
-- **Q4 — `:bench` migration error vs fallback.** Moot — no gating
-  flag to fail against. `bench` is always API-accepted; never
-  user-selectable.
-- **Q5 — Mode vs Posture separation.** User feedback: lumping
-  `bypassPermissions` next to `ask`/`plan`/`do` in a single picker
-  conflates two unrelated concepts. Resolution: split into two
-  orthogonal axes (mode = tools/prompt/budget; posture =
-  strictness). User-facing posture set is `default`, `acceptEdits`
-  (Shift+Tab), `bypassPermissions`. Bench remains a privileged
-  mode+posture pair the API can request but the UI doesn't expose.
-- **Q6 — Bundled default posture.** User feedback: clicking through
-  every approval is too cumbersome. Resolution: bundled default
-  posture is `acceptEdits`, not `default`. Diverges from Claude Code
-  but matches Crest's audience (personal local-coding workflows).
-  Risk bounded by file backups, mtime tracking, bypass-immune
-  paths, deny rules, and `shell_exec` still prompting. The cautious
-  `default` posture remains one Shift+Tab away.
+- **Classifier-based auto-approve** (Claude's `auto`/YOLO + LLM transcript classifier). Defer indefinitely; rules + posture cover the same UX for far less complexity.
+- **PermissionRequest webhook hooks**. Crest's `BeforeToolHook` pipeline already supports custom blocking — webhooks aren't needed.
+- **Policy tier** (admin/enterprise managed settings). Skip until a user asks.
+- **CLI rule-management commands** (`crest permissions add`). Settings JSON edit is enough for v1.
+- **`additionalDirectories`** (Claude's per-extra-dir rules). Useful but adds surface area; defer.
+- **Replacement for plan mode.** Removing Mode leaves a gap where `plan` lived; this design intentionally does not fill it. No system-prompt changes ship with v2. If plan-mode-style behavior turns out to matter, that's a separate design pass — likely informed by what users actually miss.
 
 ---
 
-## 8. References
+## 14. References
 
-Claude Code source paths (reference only — do not import or copy
-verbatim):
+Claude Code source paths (reference only — do not import or copy verbatim):
 
-- `src/types/permissions.ts` — types, mode constants, rule shape
-- `src/utils/permissions/permissions.ts` — `hasPermissionsToUseTool`,
-  `hasPermissionsToUseToolInner` (the decision pipeline)
-- `src/utils/permissions/PermissionMode.ts` — mode lifecycle
+- `src/types/permissions.ts` — types, posture constants, rule shape
+- `src/utils/permissions/permissions.ts` — `hasPermissionsToUseToolInner` (decision pipeline)
+- `src/utils/permissions/PermissionMode.ts` — posture lifecycle (their "mode" is our "posture")
 - `src/utils/permissions/getNextPermissionMode.ts` — Shift+Tab cycle
 - `src/utils/permissions/permissionRuleParser.ts` — rule string parser
 - `src/utils/permissions/applyPermissionUpdates.ts` — rule mutation
-- `src/utils/permissions/permissionSetup.ts` — load, gates
 - `src/utils/permissions/persistPermissionUpdates.ts` — save to disk
 - `src/components/permissions/PermissionPrompt.tsx` — approval UI
-- `src/hooks/toolPermission/PermissionContext.ts` — hook integration
 - `src/tools/BashTool/bashPermissions.ts` — Bash content matching
 - `src/tools/FileEditTool/filesystem.ts` — file path matching
+
+pi-mono reference (for the simplification stance):
+
+- `packages/coding-agent/README.md` "Philosophy" section — no mode, no plan mode, no permission popups (we keep popups but adopt the rules + posture minimalism)

@@ -16,8 +16,10 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
+	"github.com/s-zx/crest/pkg/agent/permissions"
 	"github.com/s-zx/crest/pkg/agent/tools"
 	"github.com/s-zx/crest/pkg/aiusechat"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
@@ -28,6 +30,99 @@ const AgentChatStorePrefix = "agent:"
 const AgentSourceName = "crest-agent"
 const DefaultMaxAgentSteps = 50
 const DefaultContextBudget = 100000
+
+// permissionsEngine is the process-wide engine used by every agent
+// turn. Initialized once on first use; the rule store is shared across
+// chats so session rules from one chat don't leak into another (the
+// store keys session rules by ChatId), but the builtin rule set and
+// adapter registry are pure read-only state.
+//
+// Lazy init avoids paying the cost when the agent is never invoked
+// (e.g. a process that only exposes non-agent endpoints).
+var (
+	permEngineOnce sync.Once
+	permEngine     *permissions.Engine
+)
+
+// DefaultPermissionsEngine returns the process-wide engine, building
+// it on first call. Wired from RunAgent; exposed so the future
+// /permissions UI handler can reach the engine without a global var
+// dance from a separate package.
+func DefaultPermissionsEngine() *permissions.Engine {
+	permEngineOnce.Do(func() {
+		store := permissions.NewRuleStore()
+		store.SetBuiltinRules(permissions.BuiltinRules())
+		// TODO(p8c-followup): wire UserScopeBackend to wconfig so
+		// `~/.config/waveterm/settings.json ai:permissions` rules
+		// load. Until then, user scope is empty and only project
+		// files + session rules + builtins fire.
+		permEngine = permissions.NewEngine(store)
+		permissions.RegisterDefaultAdapters(permEngine)
+	})
+	return permEngine
+}
+
+// resolvePosture returns the effective posture for a session. Order:
+//  1. Explicit Session.Posture (set by the HTTP handler from request
+//     body or `mode: "bench"` aliasing).
+//  2. Otherwise, the engine's LoadDefaultPosture (reads UserScopeBackend
+//     when wired; falls back to acceptEdits otherwise).
+//  3. Otherwise, "acceptEdits" (the bundled default per design §5).
+func resolvePosture(sess *Session, eng *permissions.Engine) permissions.Posture {
+	if sess != nil && sess.Posture != "" {
+		switch permissions.Posture(sess.Posture) {
+		case permissions.PostureDefault,
+			permissions.PostureAcceptEdits,
+			permissions.PostureBypass,
+			permissions.PostureBench:
+			return permissions.Posture(sess.Posture)
+		}
+	}
+	if eng != nil {
+		return eng.LoadDefaultPosture()
+	}
+	return permissions.PostureAcceptEdits
+}
+
+// makeApprovalDecider builds the per-turn closure that the
+// uctypes.WaveChatOpts.ApprovalDecider hook calls for every tool
+// invocation. The closure captures cwd + chatId + a pointer to the
+// session so the engine can run path-relative checks (acceptEdits)
+// and load project rules.
+//
+// Posture is intentionally re-resolved on every call rather than
+// captured at construction time. When Shift+Tab posture toggling
+// lands on the FE, the user will be able to flip posture in the
+// middle of an agent run — the toggle should take effect on the
+// very next tool call, not "next user message" (which would require
+// a fresh RunAgent invocation). Today this is a no-op since posture
+// is set once by the HTTP handler, but it costs nothing and removes
+// the silent-staleness footgun for whoever wires the toggle.
+func makeApprovalDecider(eng *permissions.Engine, sess *Session) uctypes.ApprovalDecider {
+	if eng == nil || sess == nil {
+		return nil
+	}
+	chatId := AgentChatStorePrefix + sess.ChatID
+	cwd := sess.Cwd
+	return func(toolCall uctypes.WaveToolCall) uctypes.ApprovalDecision {
+		ctx := sess.Ctx
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		input, _ := toolCall.Input.(map[string]any)
+		decision := eng.Decide(ctx, permissions.CheckRequest{
+			ToolName: toolCall.Name,
+			Input:    input,
+			ChatId:   chatId,
+			Cwd:      cwd,
+			Posture:  resolvePosture(sess, eng),
+		})
+		return uctypes.ApprovalDecision{
+			Behavior: string(decision.Behavior),
+			Reason:   decision.Reason.Detail,
+		}
+	}
+}
 
 // AgentOpts bundles everything RunAgent needs for a single turn.
 type AgentOpts struct {
@@ -75,6 +170,8 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 	if opts.Session.Mode != nil && opts.Session.Mode.StepBudget > 0 {
 		maxSteps = opts.Session.Mode.StepBudget
 	}
+	eng := DefaultPermissionsEngine()
+	posture := resolvePosture(opts.Session, eng)
 	chatOpts := uctypes.WaveChatOpts{
 		ChatId:               agentChatId,
 		ClientId:             clientID,
@@ -89,6 +186,8 @@ func RunAgent(ctx context.Context, sseHandler *sse.SSEHandlerCh, clientID string
 		MetricsCallback:      makeTrajectoryWriter(opts.Session.Cwd, opts.Session.ChatID),
 		FileChangeCallback:   makeFileChangeRecorder(agentChatId, opts.UserMsg.MessageId),
 		PendingTodosCheck:    makePendingTodosCheck(agentChatId),
+		Posture:              string(posture),
+		ApprovalDecider:      makeApprovalDecider(eng, opts.Session),
 	}
 
 	return aiusechat.WaveAIPostMessageWrap(ctx, sseHandler, opts.UserMsg, chatOpts)

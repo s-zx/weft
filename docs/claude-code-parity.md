@@ -15,7 +15,7 @@ Reference: `/Users/user/Documents/Claude-Code/` source.
 |---|---|---|---|
 | 1 | Reliability hardening (Phases 1-4) | ✅ shipped | commit `0ce9f60b` — see §1 |
 | 2 | Context Governance v2 (remainder) | ✅ shipped | context collapse + richer summary — see §2 |
-| 3 | Permissions v2 (design) | 📐 design first | rules × scopes × modes — see §3 |
+| 3 | Permissions v2 (design) | ✅ design drafted | see [`permissions-v2-design.md`](./permissions-v2-design.md); awaiting review |
 | 4 | Agent Task Runtime v2 | ⏳ queued | background tasks, lifecycle, UI surface — see §4 |
 | 5 | Command Layer v1 | ⏳ queued | real slash commands, autocomplete — see §5 |
 | 6 | Memory System (P1) | 📋 planned | hierarchical CLAUDE.md, auto-extract — see §6 |
@@ -96,28 +96,28 @@ list of files it has worked on across compaction.
 
 ---
 
-## §3 — Permissions v2 (design first)
+## §3 — Permissions v2
 
-**Why design first:** Claude's permission system has rules × scopes ×
-modes × hooks × classifier. Blind-copying it adds a lot of surface area
-without clear product wins. Need to decide which dimensions Crest
-actually needs before coding.
+**Status:** design doc drafted at
+[`permissions-v2-design.md`](./permissions-v2-design.md), awaiting
+user review of 4 open questions before implementation begins.
 
-**Open product questions:**
-1. Rule grammar — path globs (`/etc/**`), command patterns
-   (`rm -rf *`), tool×arg matchers, or all three?
-2. Scopes — session, project, user, machine? Where do rules persist?
-3. Per-mode override vs unified rules — does `:do` mode have its own
-   ruleset or just different *defaults* on the shared ruleset?
-4. UI surface — where does the user *see* and *edit* rules? Settings
-   page, inline approval dialog with "always" buttons, both?
-5. "Bypass permissions" mode (Claude's YOLO) — do we want it? When?
+**Highlights of the design:**
+- Rule grammar: tool-name + content matcher (`shell_exec(prefix:npm)`,
+  `edit_text_file(/path/**)`); path globs + shell prefixes + exact
+- Four scopes (highest precedence first): cliArg → user →
+  sharedProject → localProject → session
+- Modes become rule presets, not parallel rule namespaces — one rule
+  pool, modes flip default posture
+- `bench` IS the bypass mode (no fifth mode invented)
+- Bypass-immune safety checks: `.git/`, `.ssh/`, `.env`, `rm -rf /`,
+  `curl|sh`, etc. force a prompt regardless of mode
+- v1 ships **without** classifier (defer to v2); without
+  PermissionRequest hooks (no hook framework yet); without policy tier
 
-**Plan:** write a separate `docs/permissions-v2-design.md` answering
-these before any code. Reference Claude implementation:
-- `src/utils/permissions/PermissionMode.ts`
-- `src/utils/permissions/permissions.ts`
-- `src/hooks/toolPermission/PermissionContext.ts`
+**Implementation order in design doc §5.3.** ETA: 2 sittings for core
+(parser → matchers → store → engine → tool adapters → wire-in), 1
+sitting for UI polish + defaults.
 
 ---
 
@@ -191,6 +191,9 @@ beyond positional strings.
 | 2026-04-27 | spawn_task returns final assistant text via `ConvertAIChatToUIChat` | Avoids needing a new method on the Backend interface |
 | 2026-04-27 | Context collapse via opt-in `ToolResultCollapsible` interface, not a Backend method | Same pattern as `MessageDependsOnPrev`; only the message types that carry tool results need to opt in, no new method on the Backend interface |
 | 2026-04-27 | Heavy-summary file list pulled from `metrics.AuditLog`, not chatstore-tracked | Audit log already exists; threading it into chatstore would need an interface change for marginal benefit |
+| 2026-04-27 | Permissions v2 — `bench` mode IS the bypass mode | Avoids inventing a fifth mode; existing semantics already match Claude's `bypassPermissions` |
+| 2026-04-27 | Permissions v2 — rules in standalone `pkg/agent/permissions` package | Clean cycle story; engine reusable beyond the agent loop |
+| 2026-04-27 | Permissions v2 — defer classifier to v2 | Rules-first ships value sooner; classifier needs prompt design + gating |
 
 ---
 

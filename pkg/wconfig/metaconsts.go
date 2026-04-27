@@ -29,6 +29,7 @@ const (
 	ConfigKey_AiMaxTokens                    = "ai:maxtokens"
 	ConfigKey_AiTimeoutMs                    = "ai:timeoutms"
 	ConfigKey_AiMcpServers                   = "ai:mcpservers"
+	ConfigKey_AiPermissions                  = "ai:permissions"
 
 	ConfigKey_TermClear                      = "term:*"
 	ConfigKey_TermFontSize                   = "term:fontsize"

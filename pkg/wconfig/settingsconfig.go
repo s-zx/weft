@@ -45,6 +45,18 @@ type MCPServerConfig struct {
 	Enabled *bool             `json:"enabled,omitempty"`
 }
 
+// AIPermissionsConfig is the on-disk shape of the user-scope permission
+// rule set. Mirrors permissions.AIPermissionsConfig — kept duplicated
+// (rather than imported) so wconfig stays at the bottom of the import
+// graph. The agent-side backend translates between this and the
+// permissions package's own type.
+type AIPermissionsConfig struct {
+	Allow          []string `json:"allow,omitempty"`
+	Deny           []string `json:"deny,omitempty"`
+	Ask            []string `json:"ask,omitempty"`
+	DefaultPosture string   `json:"defaultPosture,omitempty"`
+}
+
 func (c MCPServerConfig) IsEnabled() bool {
 	return c.Enabled == nil || *c.Enabled
 }
@@ -73,6 +85,7 @@ type SettingsType struct {
 	AiMaxTokens          float64                      `json:"ai:maxtokens,omitempty"`
 	AiTimeoutMs          float64                      `json:"ai:timeoutms,omitempty"`
 	AiMcpServers         map[string]MCPServerConfig   `json:"ai:mcpservers,omitempty"`
+	AiPermissions        *AIPermissionsConfig         `json:"ai:permissions,omitempty"`
 
 	TermClear               bool     `json:"term:*,omitempty"`
 	TermFontSize            float64  `json:"term:fontsize,omitempty"`

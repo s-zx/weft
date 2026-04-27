@@ -572,6 +572,10 @@ export class TermViewModel implements ViewModel {
         return ctx;
     }
 
+    getTermAgentCwd(): string | undefined {
+        return this.buildTermAgentContext().cwd;
+    }
+
     getTermAgentModelOverride(): string {
         return this.termAgentModelOverride ?? "";
     }

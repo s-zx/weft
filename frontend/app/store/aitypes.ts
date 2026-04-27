@@ -3,6 +3,14 @@
 
 import { ChatRequestOptions, FileUIPart, UIMessage, UIMessagePart } from "ai";
 
+export type SuggestedRule = {
+    toolname: string;
+    content?: string;
+    display: string;
+};
+
+export type ApprovalDestination = "session" | "localProject" | "sharedProject" | "user";
+
 type WaveUIDataTypes = {
     userfile: {
         filename: string;
@@ -23,6 +31,10 @@ type WaveUIDataTypes = {
         inputfilename?: string;
         originalcontent?: string;
         modifiedcontent?: string;
+        // Populated when approval == "needs-approval" and the permissions
+        // engine emitted "remember this" suggestions. Empty/missing on
+        // auto-approved or already-decided calls.
+        suggestions?: SuggestedRule[];
     };
     toolprogress: {
         toolcallid: string;

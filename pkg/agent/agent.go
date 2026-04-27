@@ -13,9 +13,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -48,18 +50,51 @@ var (
 // it on first call. Wired from RunAgent; exposed so the future
 // /permissions UI handler can reach the engine without a global var
 // dance from a separate package.
+//
+// Also registers the accepted-suggestion persister with aiusechat so
+// the wshserver-side approval handler can persist "remember this"
+// rules without taking a direct dependency on the permissions package.
 func DefaultPermissionsEngine() *permissions.Engine {
 	permEngineOnce.Do(func() {
 		store := permissions.NewRuleStore()
 		store.SetBuiltinRules(permissions.BuiltinRules())
-		// TODO(p8c-followup): wire UserScopeBackend to wconfig so
-		// `~/.config/waveterm/settings.json ai:permissions` rules
-		// load. Until then, user scope is empty and only project
-		// files + session rules + builtins fire.
+		store.SetUserScopeBackend(NewWconfigUserScope())
 		permEngine = permissions.NewEngine(store)
 		permissions.RegisterDefaultAdapters(permEngine)
+		aiusechat.RegisterAcceptedSuggestionPersister(persistAcceptedSuggestion)
 	})
 	return permEngine
+}
+
+// persistAcceptedSuggestion is the bridge installed on
+// aiusechat.RegisterAcceptedSuggestionPersister. Maps the destination
+// string to a RuleScope and writes via the engine.
+//
+// The chat scope key carries the AgentChatStorePrefix; suggestion
+// posting from wshserver supplies the bare chat UUID.
+func persistAcceptedSuggestion(s aiusechat.AcceptedSuggestion) error {
+	rule := permissions.Rule{
+		Behavior: permissions.RuleAllow,
+		ToolName: s.ToolName,
+		Content:  s.Content,
+	}
+	eng := DefaultPermissionsEngine()
+	switch s.Destination {
+	case "session", "":
+		// Default to session scope when destination is unset — least-
+		// commitment behavior matches the design's "save to session
+		// by default" rationale.
+		eng.AddSessionRule(AgentChatStorePrefix+s.ChatId, rule)
+		return nil
+	case "localProject":
+		return eng.PersistRules(context.Background(), permissions.ScopeLocalProject, s.Cwd, []permissions.Rule{rule})
+	case "sharedProject":
+		return eng.PersistRules(context.Background(), permissions.ScopeSharedProject, s.Cwd, []permissions.Rule{rule})
+	case "user":
+		return eng.PersistRules(context.Background(), permissions.ScopeUser, "", []permissions.Rule{rule})
+	default:
+		return fmt.Errorf("unknown destination %q", s.Destination)
+	}
 }
 
 // resolvePosture returns the effective posture for a session. Order:
@@ -118,10 +153,48 @@ func makeApprovalDecider(eng *permissions.Engine, sess *Session) uctypes.Approva
 			Posture:  resolvePosture(sess, eng),
 		})
 		return uctypes.ApprovalDecision{
-			Behavior: string(decision.Behavior),
-			Reason:   decision.Reason.Detail,
+			Behavior:    string(decision.Behavior),
+			Reason:      decision.Reason.Detail,
+			Suggestions: translateSuggestions(decision.Suggestions),
 		}
 	}
+}
+
+// translateSuggestions converts the permissions package's Rule list
+// (returned by adapters' SuggestRules) into the uctypes SuggestedRule
+// shape the FE consumes via the data-tooluse SSE payload.
+//
+// Display strings mirror what Claude Code shows: exact tool/content
+// for the most-specific rule, "all X commands" for prefix-shaped
+// rules, "all calls to X" for the bare-tool form. Falls back to the
+// raw rule string when no friendly label is obvious — better to show
+// something than to drop the suggestion.
+func translateSuggestions(rules []permissions.Rule) []uctypes.SuggestedRule {
+	if len(rules) == 0 {
+		return nil
+	}
+	out := make([]uctypes.SuggestedRule, 0, len(rules))
+	for _, r := range rules {
+		out = append(out, uctypes.SuggestedRule{
+			ToolName: r.ToolName,
+			Content:  r.Content,
+			Display:  suggestionDisplay(r),
+		})
+	}
+	return out
+}
+
+func suggestionDisplay(r permissions.Rule) string {
+	if r.Content == "" {
+		return fmt.Sprintf("all %s calls", r.ToolName)
+	}
+	if strings.HasPrefix(r.Content, "prefix:") {
+		return fmt.Sprintf("all `%s` commands", strings.TrimPrefix(r.Content, "prefix:"))
+	}
+	if strings.Contains(r.Content, "**") {
+		return fmt.Sprintf("anywhere matching %s", r.Content)
+	}
+	return r.Content
 }
 
 // AgentOpts bundles everything RunAgent needs for a single turn.

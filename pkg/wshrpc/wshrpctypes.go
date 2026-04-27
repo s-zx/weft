@@ -572,8 +572,17 @@ type CommandGetWaveAIChatData struct {
 }
 
 type CommandWaveAIToolApproveData struct {
+	ChatId     string `json:"chatid,omitempty"`
 	ToolCallId string `json:"toolcallid"`
 	Approval   string `json:"approval,omitempty"`
+	// Optional: when the user clicks "Approve and Remember", these
+	// fields carry the chosen suggestion + destination so the server
+	// can persist a permission rule alongside approving this single
+	// call.
+	AcceptedToolName    string `json:"acceptedtoolname,omitempty"`
+	AcceptedContent     string `json:"acceptedcontent,omitempty"`
+	AcceptedDestination string `json:"accepteddestination,omitempty"` // "session" | "localProject" | "sharedProject" | "user"
+	Cwd                 string `json:"cwd,omitempty"`                  // required for project-scope persistence
 }
 
 type AIAttachedFile struct {

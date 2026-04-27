@@ -241,6 +241,10 @@ type UIMessageDataToolUse struct {
 	InputFileName       string `json:"inputfilename,omitempty"`
 	OriginalContent     string `json:"originalcontent,omitempty"`
 	ModifiedContent     string `json:"modifiedcontent,omitempty"`
+	// Suggestions is populated when Approval == "needs-approval" and
+	// the permissions engine has "remember this" rule shortcuts. The
+	// FE renders them as a radio-list under the Approve/Deny buttons.
+	Suggestions []SuggestedRule `json:"suggestions,omitempty"`
 }
 
 func (d *UIMessageDataToolUse) IsApproved() bool {
@@ -644,9 +648,28 @@ func (m *UIMessage) GetContent() string {
 // `behavior` is "allow" | "ask" | "deny". `reason` is a short
 // human-readable explanation that the dispatcher writes into the
 // tool result on deny so the model can read why it was rejected.
+// `suggestions` is populated when behavior=="ask" — the FE renders
+// these as "remember this" options in the approval prompt.
 type ApprovalDecision struct {
-	Behavior string
-	Reason   string
+	Behavior    string
+	Reason      string
+	Suggestions []SuggestedRule
+}
+
+// SuggestedRule is the FE-facing form of a permissions.Rule. The
+// permissions package emits []Rule from each tool's adapter.SuggestRules;
+// the agent runtime translates those into SuggestedRule for the SSE
+// payload. Display is the human-readable label (e.g. "All `npm`
+// commands" or "Anywhere under /Users/me/work"); ToolName + Content
+// is the wire form posted back to UpdateToolApproval when the user
+// picks one.
+//
+// Living in uctypes (not permissions) so UIMessageDataToolUse can
+// embed them without a uctypes → permissions import.
+type SuggestedRule struct {
+	ToolName string `json:"toolname"`
+	Content  string `json:"content,omitempty"`
+	Display  string `json:"display"`
 }
 
 // ApprovalDecider is the closure CreateToolUseData calls to decide

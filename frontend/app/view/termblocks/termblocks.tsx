@@ -620,6 +620,15 @@ export class TermBlocksViewModel implements ViewModel {
         return ctx;
     }
 
+    // Stable cwd accessor for the permission approval prompt — needs
+    // current cwd when the user picks "save to this project".
+    // Mirrors term-model's implementation but the focused block id may
+    // shift across calls in the multi-block view, so always query live.
+    getTermAgentCwd(): string | undefined {
+        const cwd = globalStore.get(this.blockCwdAtom);
+        return cwd || undefined;
+    }
+
     syncAgentMessages(messages: WaveUIMessage[], status: string) {
         const entries: TimelineEntry[] = [];
         for (const msg of messages) {

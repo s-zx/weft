@@ -3,6 +3,33 @@
   "$id": "https://github.com/s-zx/crest/pkg/wconfig/settings-type",
   "$ref": "#/$defs/SettingsType",
   "$defs": {
+    "AIPermissionsConfig": {
+      "properties": {
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ask": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "defaultPosture": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "MCPServerConfig": {
       "properties": {
         "command": {
@@ -109,6 +136,9 @@
             "$ref": "#/$defs/MCPServerConfig"
           },
           "type": "object"
+        },
+        "ai:permissions": {
+          "$ref": "#/$defs/AIPermissionsConfig"
         },
         "term:*": {
           "type": "boolean"

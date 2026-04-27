@@ -1,7 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { WaveUIMessage, WaveUIMessagePart } from "@/store/aitypes";
+import { ApprovalDestination, SuggestedRule, WaveUIMessage, WaveUIMessagePart } from "@/store/aitypes";
 import * as Diff from "diff";
 import { WaveStreamdown } from "@/app/element/streamdown";
 import { globalStore } from "@/app/store/jotaiStore";
@@ -11,7 +11,7 @@ import { getWebServerEndpoint } from "@/util/endpoints";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import * as jotai from "jotai";
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 const TermAgentCodeBlockMaxWidth = jotai.atom(720);
 const TermAgentInlineDiffMaxBytes = 200_000;
@@ -31,6 +31,10 @@ export type TermAgentModel = {
     getAndClearTermAgentPendingMode(): string;
     getAndClearTermAgentPendingContext(): any;
     getAndClearTermAgentPlanPath(): string;
+    // getTermAgentCwd returns the current cwd for permission persistence
+    // ("save to this project" needs cwd). Stable accessor unlike the
+    // pending-context getter which clears state.
+    getTermAgentCwd(): string | undefined;
     termAgentLastPlanPath: string | null;
     executePlan(): void;
     registerTermAgentChat(
@@ -160,34 +164,111 @@ const TermAgentInlineDiff = memo(
 
 TermAgentInlineDiff.displayName = "TermAgentInlineDiff";
 
-const TermAgentApprovalButtons = memo(({ toolCallId }: { toolCallId: string }) => {
-    const [approvalOverride, setApprovalOverride] = useState<string | null>(null);
+// TermAgentApprovalContext threads chatId + cwd from the chat-level
+// model down to the per-tool-call approval button without prop-drilling
+// through three intermediate components. Both fields are required when
+// the user picks "Approve and Remember" with a non-session destination
+// (project rules need cwd, all destinations need chatId for session-
+// scope writes).
+type TermAgentApprovalContextValue = {
+    chatId: string;
+    getCwd: () => string | undefined;
+};
 
-    const sendApproval = (approval: "user-approved" | "user-denied") => {
-        setApprovalOverride(approval);
-        RpcApi.WaveAIToolApproveCommand(TabRpcClient, {
-            toolcallid: toolCallId,
-            approval,
-        });
-    };
+const TermAgentApprovalContext = createContext<TermAgentApprovalContextValue | null>(null);
 
-    return (
-        <div className="mt-2 flex gap-2">
-            <button
-                className="rounded border border-emerald-500/60 px-2 py-1 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/10"
-                onClick={() => sendApproval("user-approved")}
-            >
-                {approvalOverride === "user-approved" ? "Approved" : "Approve"}
-            </button>
-            <button
-                className="rounded border border-red-500/60 px-2 py-1 text-xs text-red-200 transition-colors hover:bg-red-500/10"
-                onClick={() => sendApproval("user-denied")}
-            >
-                {approvalOverride === "user-denied" ? "Denied" : "Deny"}
-            </button>
-        </div>
-    );
-});
+const TermAgentApprovalButtons = memo(
+    ({ toolCallId, suggestions }: { toolCallId: string; suggestions?: SuggestedRule[] }) => {
+        const [approvalOverride, setApprovalOverride] = useState<string | null>(null);
+        // selectedIdx === -1 means "approve once, don't remember" — the
+        // default. Picking a suggestion sets the index; clicking the
+        // radio again toggles back to -1.
+        const [selectedIdx, setSelectedIdx] = useState<number>(-1);
+        const [destination, setDestination] = useState<ApprovalDestination>("session");
+        const ctx = useContext(TermAgentApprovalContext);
+        const hasSuggestions = (suggestions?.length ?? 0) > 0;
+
+        const sendApproval = (approval: "user-approved" | "user-denied") => {
+            setApprovalOverride(approval);
+            const payload: Parameters<typeof RpcApi.WaveAIToolApproveCommand>[1] = {
+                toolcallid: toolCallId,
+                approval,
+            };
+            // Persist a "remember this" rule alongside the approval. Only
+            // sent on user-approved + a chosen suggestion — denials and
+            // approve-once never persist.
+            if (approval === "user-approved" && hasSuggestions && selectedIdx >= 0 && ctx) {
+                const chosen = suggestions![selectedIdx];
+                payload.chatid = ctx.chatId;
+                payload.acceptedtoolname = chosen.toolname;
+                payload.acceptedcontent = chosen.content;
+                payload.accepteddestination = destination;
+                if (destination === "localProject" || destination === "sharedProject") {
+                    payload.cwd = ctx.getCwd();
+                }
+            }
+            RpcApi.WaveAIToolApproveCommand(TabRpcClient, payload);
+        };
+
+        return (
+            <div className="mt-2 flex flex-col gap-2">
+                <div className="flex gap-2">
+                    <button
+                        className="rounded border border-emerald-500/60 px-2 py-1 text-xs text-emerald-200 transition-colors hover:bg-emerald-500/10 cursor-pointer"
+                        onClick={() => sendApproval("user-approved")}
+                    >
+                        {approvalOverride === "user-approved"
+                            ? selectedIdx >= 0
+                                ? "Approved + saved"
+                                : "Approved"
+                            : selectedIdx >= 0
+                              ? "Approve and remember"
+                              : "Approve"}
+                    </button>
+                    <button
+                        className="rounded border border-red-500/60 px-2 py-1 text-xs text-red-200 transition-colors hover:bg-red-500/10 cursor-pointer"
+                        onClick={() => sendApproval("user-denied")}
+                    >
+                        {approvalOverride === "user-denied" ? "Denied" : "Deny"}
+                    </button>
+                </div>
+                {hasSuggestions && approvalOverride == null && (
+                    <div className="rounded border border-zinc-700/60 bg-black/20 p-2 text-xs text-zinc-300">
+                        <div className="mb-1 text-zinc-400">Or remember:</div>
+                        <div className="flex flex-col gap-1">
+                            {suggestions!.map((s, i) => (
+                                <label key={i} className="flex cursor-pointer items-center gap-2">
+                                    <input
+                                        type="radio"
+                                        name={`suggest-${toolCallId}`}
+                                        checked={selectedIdx === i}
+                                        onChange={() => setSelectedIdx(i)}
+                                    />
+                                    <span>{s.display}</span>
+                                </label>
+                            ))}
+                        </div>
+                        {selectedIdx >= 0 && (
+                            <div className="mt-2 flex items-center gap-2 text-zinc-400">
+                                <span>Save to:</span>
+                                <select
+                                    className="rounded border border-zinc-600 bg-black/30 px-1 py-0.5 text-zinc-200 cursor-pointer"
+                                    value={destination}
+                                    onChange={(e) => setDestination(e.target.value as ApprovalDestination)}
+                                >
+                                    <option value="session">This chat only</option>
+                                    <option value="localProject">This project (local)</option>
+                                    <option value="sharedProject">This project (shared)</option>
+                                    <option value="user">Always (all projects)</option>
+                                </select>
+                            </div>
+                        )}
+                    </div>
+                )}
+            </div>
+        );
+    }
+);
 
 TermAgentApprovalButtons.displayName = "TermAgentApprovalButtons";
 
@@ -229,7 +310,10 @@ const TermAgentToolUse = memo(({ part, isStreaming }: { part: WaveUIMessagePart;
             )}
             {errorText && <div className="mt-2 text-xs text-red-300">{errorText}</div>}
             {approval === "needs-approval" && isStreaming && toolData?.toolcallid && (
-                <TermAgentApprovalButtons toolCallId={toolData.toolcallid} />
+                <TermAgentApprovalButtons
+                    toolCallId={toolData.toolcallid}
+                    suggestions={toolData.suggestions}
+                />
             )}
         </div>
     );
@@ -385,6 +469,11 @@ export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
     const inputValue = jotai.useAtomValue(model.termAgentInput);
     const errorText = jotai.useAtomValue(model.termAgentError);
     const agentMode = jotai.useAtomValue(model.termAgentAgentMode);
+    const chatId = jotai.useAtomValue(model.termAgentChatId);
+    const approvalCtx = useMemo<TermAgentApprovalContextValue>(
+        () => ({ chatId, getCwd: () => model.getTermAgentCwd() }),
+        [chatId, model]
+    );
     const scrollRef = useRef<HTMLDivElement>(null);
     const composerInputRef = useRef<HTMLInputElement>(null);
 
@@ -422,6 +511,7 @@ export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
     const mode = agentMode;
 
     return (
+        <TermAgentApprovalContext.Provider value={approvalCtx}>
         <div className="pointer-events-none absolute inset-x-3 bottom-3 z-[var(--zindex-block-mask-inner)] flex justify-center">
             <div className="pointer-events-auto w-full max-w-[860px] overflow-hidden rounded-2xl border border-zinc-700/80 bg-[rgb(16_16_18_/_0.94)] shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                 <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
@@ -520,6 +610,7 @@ export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
                 </div>
             </div>
         </div>
+        </TermAgentApprovalContext.Provider>
     );
 });
 

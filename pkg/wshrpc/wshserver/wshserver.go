@@ -1288,6 +1288,24 @@ func (ws *WshServer) GetWaveAIChatCommand(ctx context.Context, data wshrpc.Comma
 }
 
 func (ws *WshServer) WaveAIToolApproveCommand(ctx context.Context, data wshrpc.CommandWaveAIToolApproveData) error {
+	// Persist "remember this" rule first so it lands in the engine
+	// before the next tool call (which may be the same shape and
+	// would otherwise re-prompt). Persistence is best-effort —
+	// failing to save a rule shouldn't block the approval the user
+	// already clicked. We log but continue.
+	if data.AcceptedToolName != "" && data.AcceptedDestination != "" {
+		err := aiusechat.PersistAcceptedSuggestion(aiusechat.AcceptedSuggestion{
+			ChatId:      data.ChatId,
+			ToolCallId:  data.ToolCallId,
+			ToolName:    data.AcceptedToolName,
+			Content:     data.AcceptedContent,
+			Destination: data.AcceptedDestination,
+			Cwd:         data.Cwd,
+		})
+		if err != nil {
+			log.Printf("WaveAIToolApprove: persist suggestion failed: %v\n", err)
+		}
+	}
 	return aiusechat.UpdateToolApproval(data.ToolCallId, data.Approval)
 }
 

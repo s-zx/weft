@@ -278,6 +278,10 @@ func CreateToolUseData(toolCallID, toolName string, arguments string, chatOpts u
 			toolUseData.Approval = uctypes.ApprovalAutoApproved
 		case "ask":
 			toolUseData.Approval = uctypes.ApprovalNeedsApproval
+			// Suggestions only matter when we're prompting; copying
+			// them on the allow/deny paths would just bloat the SSE
+			// payload.
+			toolUseData.Suggestions = decision.Suggestions
 		case "deny":
 			// Mark the tool-use as pre-failed so processToolCallInternal's
 			// early-return path produces the error result without ever

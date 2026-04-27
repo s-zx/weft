@@ -42,6 +42,14 @@ declare global {
         configs: {[key: string]: AIModeConfigType};
     };
 
+    // wconfig.AIPermissionsConfig
+    type AIPermissionsConfig = {
+        allow?: string[];
+        deny?: string[];
+        ask?: string[];
+        defaultPosture?: string;
+    };
+
     // wshrpc.ActivityDisplayType
     type ActivityDisplayType = {
         width: number;
@@ -840,8 +848,13 @@ declare global {
 
     // wshrpc.CommandWaveAIToolApproveData
     type CommandWaveAIToolApproveData = {
+        chatid?: string;
         toolcallid: string;
         approval?: string;
+        acceptedtoolname?: string;
+        acceptedcontent?: string;
+        accepteddestination?: string;
+        cwd?: string;
     };
 
     // wshrpc.CommandWaveFileReadStreamData
@@ -1510,6 +1523,7 @@ declare global {
         "ai:maxtokens"?: number;
         "ai:timeoutms"?: number;
         "ai:mcpservers"?: {[key: string]: MCPServerConfig};
+        "ai:permissions"?: AIPermissionsConfig;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;

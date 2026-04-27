@@ -15,7 +15,7 @@ Reference: `/Users/user/Documents/Claude-Code/` source.
 |---|---|---|---|
 | 1 | Reliability hardening (Phases 1-4) | ✅ shipped | commit `0ce9f60b` — see §1 |
 | 2 | Context Governance v2 (remainder) | ✅ shipped | context collapse + richer summary — see §2 |
-| 3 | Permissions v2 (design) | ✅ design drafted | see [`permissions-v2-design.md`](./permissions-v2-design.md); awaiting review |
+| 3 | Permissions v2 (design) | ✅ design approved | see [`permissions-v2-design.md`](./permissions-v2-design.md); ready to implement |
 | 4 | Agent Task Runtime v2 | ⏳ queued | background tasks, lifecycle, UI surface — see §4 |
 | 5 | Command Layer v1 | ⏳ queued | real slash commands, autocomplete — see §5 |
 | 6 | Memory System (P1) | 📋 planned | hierarchical CLAUDE.md, auto-extract — see §6 |
@@ -98,20 +98,26 @@ list of files it has worked on across compaction.
 
 ## §3 — Permissions v2
 
-**Status:** design doc drafted at
-[`permissions-v2-design.md`](./permissions-v2-design.md), awaiting
-user review of 4 open questions before implementation begins.
+**Status:** design doc approved 2026-04-27 — see
+[`permissions-v2-design.md`](./permissions-v2-design.md). All 4 open
+questions resolved; ready to implement.
 
 **Highlights of the design:**
 - Rule grammar: tool-name + content matcher (`shell_exec(prefix:npm)`,
   `edit_text_file(/path/**)`); path globs + shell prefixes + exact
-- Four scopes (highest precedence first): cliArg → user →
-  sharedProject → localProject → session
+- Five scopes (highest precedence first): cliArg → user →
+  sharedProject (`.crest/permissions.json`) → localProject
+  (`.crest/permissions.local.json`) → session
 - Modes become rule presets, not parallel rule namespaces — one rule
   pool, modes flip default posture
-- `bench` IS the bypass mode (no fifth mode invented)
+- New `bypassPermissions` mode (Claude's name) for interactive
+  "trust me" — separate from `bench`. Both auto-approve, but only
+  `bypassPermissions` keeps bypass-immune safety checks; `bench`
+  skips them so eval harnesses can do destructive things in
+  sandboxes. Both freely selectable, no gating flag.
 - Bypass-immune safety checks: `.git/`, `.ssh/`, `.env`, `rm -rf /`,
-  `curl|sh`, etc. force a prompt regardless of mode
+  `curl|sh`, `sudo`, etc. force a prompt in `bypassPermissions`.
+- Approval prompt default "save to" = `session` (least commitment).
 - v1 ships **without** classifier (defer to v2); without
   PermissionRequest hooks (no hook framework yet); without policy tier
 

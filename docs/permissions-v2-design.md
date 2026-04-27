@@ -156,11 +156,13 @@ Empty `Content` matches *any* call to that tool.
       "shell_exec(prefix:npm publish)",
       "shell_exec(prefix:git push --force)"
     ],
-    "defaultMode": "do",
-    "bypassEnabled": false
+    "defaultMode": "do"
   }
 }
 ```
+
+(No `bypassEnabled` flag — `bypassPermissions` is freely selectable
+like any other mode. The act of picking it is the consent.)
 
 Parser: `ParseRule(s string) (Rule, error)` splits on the first `(`,
 escapes `\)` and `\\`. Rejects malformed strings at load time so
@@ -211,17 +213,24 @@ Concretely:
 - **Rules** override either way. A `deny` rule beats a permissive
   mode; an `allow` rule beats a restrictive mode.
 
-The existing 4 modes map cleanly:
+Modes map as follows — `bench` stays unchanged (it's used by Harbor /
+TB2 harnesses), and a new `bypassPermissions` mode joins the user-facing
+set:
 
-| Old mode | New role |
-|---|---|
-| `ask` | Tool list = read-only set. Default behavior on no-match: allow (read tools are safe). |
-| `plan` | Tool list = read-only + write_plan. Bypass-immune: refuses any write tool in pre-tool check. |
-| `do` | Tool list = full mutation set. Default behavior on no-match: ask. |
-| `bench` | Tool list = bench set. Default behavior on no-match: allow (i.e. = `bypass`). |
+| Mode | Tools | Default on no-match | Safety checks | Audience |
+|---|---|---|---|---|
+| `ask` | read-only set | allow (reads are safe) | n/a | interactive read-only |
+| `plan` | read-only + write_plan | allow for reads, deny mutating tools at tool-side | enforced | interactive planning |
+| `do` | full mutation set | ask | enforced | interactive coding (default) |
+| `bypassPermissions` | full mutation set | allow | enforced (bypass-immune list still fires) | "trust me" interactive |
+| `bench` | bench set | allow | **off** | non-interactive eval harnesses (Harbor/TB2) |
 
-So `bench` mode IS Claude's `bypassPermissions` mode for our purposes.
-We don't need to invent a fifth mode.
+Five modes total. Both `bypassPermissions` and `bench` auto-approve;
+the difference is whether bypass-immune safety checks (`.git/`, `.ssh/`,
+`rm -rf /`, etc.) force a prompt. Bench has to skip them so eval
+tasks can do destructive things in their test sandbox without
+prompting; bypass keeps them so a real user typing `:bypass` doesn't
+accidentally lose their `.git` directory.
 
 ### 3.4 UI surface
 
@@ -276,27 +285,40 @@ follow-up. The session-prompt-with-suggestions covers 80% of UX.)
 
 ### 3.5 Bypass mode — yes? when?
 
-**Decision:** Yes. Maps to existing `bench` mode. No separate flag.
+**Decision:** Yes, as a new mode `bypassPermissions` (Claude's name).
+**Distinct from `bench`** — they look similar but serve different
+purposes and we keep both.
 
-- `bench` mode auto-approves everything *except* bypass-immune safety
-  checks.
-- Bypass-immune list (forced-prompt regardless of mode):
-  - `shell_exec`: `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`,
-    `git push --force` to main/master, anything containing
-    `curl|sh`/`wget|sh`, `:(){:|:&};:` and the obvious fork-bomb
-    patterns.
-  - File tools: writes to `.git/`, `.crest/`, `.ssh/`, `.aws/`,
-    `.gnupg/`, OS shell configs (`.bashrc`, `.zshrc`, `.profile`),
-    `.env*`, files containing `credentials` or `secret` in the name.
-  - `web_fetch`/`browser.navigate`: URLs with `localhost`/`127.0.0.1`
-    on common dev ports (defer to v2; can be footgun for local dev).
-- Safety checks emit an `ask` decision with reason
-  `"safetyCheck"`; the prompt explains why bypass was overridden.
+| Mode | Audience | Safety checks | Used by |
+|---|---|---|---|
+| `bench` | Automated test harnesses (Harbor / TB2) | **all checks off** — pure auto-approve. Needs to allow `rm -rf` in test dirs, `sudo` in containers, etc. without prompting. | `eval/harbor/crest_agent.py` |
+| `bypassPermissions` | Interactive user saying "I trust the agent" | bypass-immune safety checks **still fire** (`.git`/`.ssh`/`.env`/`rm -rf /`/`curl|sh`/etc. force a prompt) | `:bypass` overlay command |
 
-Rationale for keeping `bench` as the bypass: avoids inventing a new
-mode users have to learn. `bench` already implies "I know what I'm
-doing, don't ask," which is exactly what bypass means. The `bench`
-name is fine for now; we can rename later.
+The original draft conflated these because both auto-approve. They're
+actually different: bench needs to be **fully** unguarded so eval
+tasks can do whatever the task author wrote; bypass is a user-facing
+"YOLO with a seatbelt" — auto-approves the 99% of safe things while
+still blocking the catastrophic ones.
+
+**No gating flag.** `bypassPermissions` is selectable like any other
+mode. Users invoke it explicitly via the mode picker or a `:bypass`
+prefix; the act of choosing it is the consent.
+
+**Bypass-immune list** (only applies to `bypassPermissions`, not `bench`):
+
+- `shell_exec`: `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`,
+  `git push --force` to main/master, anything containing
+  `curl|sh` / `wget|sh`, `:(){:|:&};:` and the obvious fork-bomb
+  patterns, `prefix:sudo`.
+- File tools: writes to `.git/`, `.crest/`, `.ssh/`, `.aws/`,
+  `.gnupg/`, OS shell configs (`.bashrc`, `.zshrc`, `.profile`),
+  `.env*`, files containing `credentials` or `secret` in the name.
+- `web_fetch` / `browser.navigate`: URLs with `localhost` /
+  `127.0.0.1` on common dev ports (defer to v2; can be footgun for
+  local dev).
+
+Safety checks emit an `ask` decision with reason `"safetyCheck"`;
+the prompt explains why bypass was overridden.
 
 ---
 
@@ -479,17 +501,17 @@ type SettingsType struct {
 }
 
 type AIPermissionsConfig struct {
-    Allow         []string `json:"allow,omitempty"`        // "shell_exec(prefix:npm)"
-    Deny          []string `json:"deny,omitempty"`
-    Ask           []string `json:"ask,omitempty"`
-    DefaultMode   string   `json:"defaultMode,omitempty"`  // "ask"|"plan"|"do"|"bench"
-    BypassEnabled bool     `json:"bypassEnabled,omitempty"`// gates whether `bench` mode is selectable
+    Allow       []string `json:"allow,omitempty"`       // "shell_exec(prefix:npm)"
+    Deny        []string `json:"deny,omitempty"`
+    Ask         []string `json:"ask,omitempty"`
+    DefaultMode string   `json:"defaultMode,omitempty"` // "ask"|"plan"|"do"|"bypassPermissions"|"bench"
 }
 ```
 
-Project-local files use the same shape but live at
-`<cwd>/.crest/permissions.json` (shared) and
-`<cwd>/.crest/permissions.local.json` (gitignored).
+Project-shared rules live at `<cwd>/.crest/permissions.json` (committed
+to the repo); per-user-per-project overrides live at
+`<cwd>/.crest/permissions.local.json` (gitignored). Same JSON shape as
+the `ai:permissions` block above.
 
 ### 4.7 Frontend — approval prompt extension
 
@@ -594,7 +616,8 @@ Estimated: 2 sittings to step 6 (functional parity with mode behavior
 | Decision | Why |
 |---|---|
 | Skip classifier for v1 | Matches user's "ship rules first" call; classifier is a separate >1 sitting lift involving prompt design + Statsig-equivalent gating |
-| `bench` IS the bypass mode | Avoids introducing a fifth mode; existing semantics already match |
+| `bypassPermissions` is a new mode separate from `bench` | They look similar (both auto-approve) but the audiences and safety posture differ — bench for non-interactive evals (no checks at all, can do `rm -rf` in test sandboxes); bypass for interactive "trust me" (still blocks `rm -rf /`, `.git`, `.ssh`, etc.). Resolved 2026-04-27 per user direction |
+| No `bypassEnabled` gating flag | Picking the mode IS the consent; gating adds friction without safety value when the destructive paths are already bypass-immune. Resolved 2026-04-27 |
 | Rules in a top-level `pkg/agent/permissions` package | Cleaner cycle story; reusable beyond the agent loop |
 | `PermissionAdapter` lives on `ToolDefinition` (uctypes) | Keeps the engine pure; avoids `permissions → tools → permissions` cycle |
 | In-binary defaults shipped (Allow git-status etc.) | Most users never customize anything; sane defaults set the floor |
@@ -604,26 +627,24 @@ Estimated: 2 sittings to step 6 (functional parity with mode behavior
 
 ---
 
-## 7. Open Questions (need user input)
+## 7. Open Questions — Resolved
 
-- **Q1.** Should `bench` mode **require** an explicit `bypassEnabled: true`
-  in settings to be selectable? Claude gates `bypassPermissions` behind
-  a feature flag. We could gate `bench` similarly so a casual user
-  can't accidentally turn off all approvals via the mode picker.
-- **Q2.** Where does the project-shared rule file live —
-  `<cwd>/.crest/permissions.json` (matches our `.crest-plans` convention)
-  or `<cwd>/.claude/permissions.json`-style at the repo root? My preference
-  is `.crest/` for naming consistency, but if you'd rather keep
-  one Claude-style repo root for clarity, that's a 1-line change.
-- **Q3.** For the approval prompt's "save to" picker — what should the
-  default destination be on first prompt? Claude's default is
-  `localSettings`. I'd default to `session` (least-commitment) and let
-  users move up the ladder as they learn the system. Confirm?
-- **Q4.** Migration nuance — should existing `:bench` runs error-out
-  if `bypassEnabled` is false in settings, or silently fall back to
-  `:do`? My preference: error with a clear message ("bench mode is
-  disabled — set ai:permissions.bypassEnabled=true to use it"), don't
-  silently change behavior.
+All four resolved 2026-04-27:
+
+- **Q1 — bypass mode name and gating.** The "yolo with safety" mode is
+  `bypassPermissions` (Claude's name), distinct from `bench`. Both
+  auto-approve, but `bench` skips safety checks (for eval harnesses)
+  and `bypassPermissions` keeps them. **No** `bypassEnabled` gating
+  flag — the mode is freely selectable; choosing it is the consent.
+- **Q2 — project rule file location.** `<cwd>/.crest/permissions.json`
+  (shared) and `<cwd>/.crest/permissions.local.json` (gitignored).
+  Matches the `.crest-plans` and `.crest-trajectories` convention.
+- **Q3 — default "save to" destination.** `session` — least
+  commitment; users move up the ladder (project / user) as they learn
+  what they actually want persistent.
+- **Q4 — `:bench` migration error vs fallback.** Moot, since (Q1)
+  there's no `bypassEnabled` gating to fail against. Both `bench` and
+  `bypassPermissions` are always selectable.
 
 ---
 

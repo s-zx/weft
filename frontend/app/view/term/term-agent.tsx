@@ -257,8 +257,17 @@ const TermAgentApprovalButtons = memo(
                                     onChange={(e) => setDestination(e.target.value as ApprovalDestination)}
                                 >
                                     <option value="session">This chat only</option>
-                                    <option value="localProject">This project (local)</option>
-                                    <option value="sharedProject">This project (shared)</option>
+                                    {/* Project options need cwd to write the right
+                                        .crest/permissions{,.local}.json file. When
+                                        cwd is unknown (e.g. focused block has none
+                                        yet), disable them rather than letting the
+                                        backend silently fail with no UI feedback. */}
+                                    <option value="localProject" disabled={!ctx?.getCwd()}>
+                                        This project (local){!ctx?.getCwd() ? " — cwd unknown" : ""}
+                                    </option>
+                                    <option value="sharedProject" disabled={!ctx?.getCwd()}>
+                                        This project (shared){!ctx?.getCwd() ? " — cwd unknown" : ""}
+                                    </option>
                                     <option value="user">Always (all projects)</option>
                                 </select>
                             </div>

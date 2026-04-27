@@ -26,10 +26,8 @@ const (
 )
 
 const (
-	DefaultStepBudget    = 40
-	DefaultFailureBudget = 3
-	BenchStepBudget      = 100
-	BenchFailureBudget   = 10
+	DefaultStepBudget = 40
+	BenchStepBudget   = 100
 )
 
 // validModes accepts only canonical names; the empty string is also
@@ -156,11 +154,3 @@ func StepBudgetForMode(name string) int {
 	return DefaultStepBudget
 }
 
-// FailureBudgetForMode returns the per-turn failure budget. Bench
-// gets 10 (eval harnesses tolerate more error churn); others get 3.
-func FailureBudgetForMode(name string) int {
-	if NormalizeMode(name) == ModeBench {
-		return BenchFailureBudget
-	}
-	return DefaultFailureBudget
-}

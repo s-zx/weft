@@ -16,6 +16,11 @@ import (
 // settings, sharedProject, and localProject files. The defaultPosture
 // field is only honored when loaded from the user scope; project files
 // don't override the user's posture preference.
+//
+// DUPLICATED IN: pkg/wconfig/settingsconfig.go. Keep field set in
+// sync; pkg/agent/permissions_userscope.go translates between the
+// two structs field-by-field and silently drops anything that exists
+// on only one side.
 type AIPermissionsConfig struct {
 	Allow          []string `json:"allow,omitempty"`
 	Deny           []string `json:"deny,omitempty"`

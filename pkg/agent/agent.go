@@ -70,6 +70,14 @@ func DefaultPermissionsEngine() *permissions.Engine {
 // aiusechat.RegisterAcceptedSuggestionPersister. Maps the destination
 // string to a RuleScope and writes via the engine.
 //
+// Validation is strict: each destination has prerequisites (session
+// needs ChatId; project scopes need Cwd). When prerequisites fail we
+// return an error rather than silently mis-routing — the wshserver
+// caller logs it; the FE button will surface "approved but not saved"
+// once the wshrpc layer threads the error back. Today wshserver
+// only logs, so a UX gap; the FE-side guard (disabling project
+// options when cwd is unknown) is the primary defense.
+//
 // The chat scope key carries the AgentChatStorePrefix; suggestion
 // posting from wshserver supplies the bare chat UUID.
 func persistAcceptedSuggestion(s aiusechat.AcceptedSuggestion) error {
@@ -84,11 +92,20 @@ func persistAcceptedSuggestion(s aiusechat.AcceptedSuggestion) error {
 		// Default to session scope when destination is unset — least-
 		// commitment behavior matches the design's "save to session
 		// by default" rationale.
+		if s.ChatId == "" {
+			return fmt.Errorf("chatid required for session-scope persistence")
+		}
 		eng.AddSessionRule(AgentChatStorePrefix+s.ChatId, rule)
 		return nil
 	case "localProject":
+		if s.Cwd == "" {
+			return fmt.Errorf("cwd required for localProject-scope persistence")
+		}
 		return eng.PersistRules(context.Background(), permissions.ScopeLocalProject, s.Cwd, []permissions.Rule{rule})
 	case "sharedProject":
+		if s.Cwd == "" {
+			return fmt.Errorf("cwd required for sharedProject-scope persistence")
+		}
 		return eng.PersistRules(context.Background(), permissions.ScopeSharedProject, s.Cwd, []permissions.Rule{rule})
 	case "user":
 		return eng.PersistRules(context.Background(), permissions.ScopeUser, "", []permissions.Rule{rule})
@@ -189,7 +206,12 @@ func suggestionDisplay(r permissions.Rule) string {
 		return fmt.Sprintf("all %s calls", r.ToolName)
 	}
 	if strings.HasPrefix(r.Content, "prefix:") {
-		return fmt.Sprintf("all `%s` commands", strings.TrimPrefix(r.Content, "prefix:"))
+		// Strip backticks from the rendered command — the display
+		// string isn't markdown but downstream UIs may eventually
+		// treat it as such, and tool-supplied content shouldn't be
+		// able to break formatting.
+		cmd := strings.ReplaceAll(strings.TrimPrefix(r.Content, "prefix:"), "`", "")
+		return fmt.Sprintf("all `%s` commands", cmd)
 	}
 	if strings.Contains(r.Content, "**") {
 		return fmt.Sprintf("anywhere matching %s", r.Content)

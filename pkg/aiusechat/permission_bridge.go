@@ -27,10 +27,17 @@ var acceptedSuggestionPersister func(s AcceptedSuggestion) error
 // RegisterAcceptedSuggestionPersister installs the function that turns
 // an accepted suggestion into a persisted permission rule. Called once
 // at agent startup with a closure that wraps a permissions.Engine.
-// Calling twice replaces the previous registration; nil disables
-// persistence.
-func RegisterAcceptedSuggestionPersister(fn func(AcceptedSuggestion) error) {
+// Returns the previously-registered function so test setup can defer
+// restoration:
+//
+//	prev := RegisterAcceptedSuggestionPersister(testFn)
+//	defer RegisterAcceptedSuggestionPersister(prev)
+//
+// Passing nil disables persistence.
+func RegisterAcceptedSuggestionPersister(fn func(AcceptedSuggestion) error) func(AcceptedSuggestion) error {
+	prev := acceptedSuggestionPersister
 	acceptedSuggestionPersister = fn
+	return prev
 }
 
 // PersistAcceptedSuggestion is the wshserver-facing entry point. It

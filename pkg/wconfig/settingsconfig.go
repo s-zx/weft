@@ -50,11 +50,16 @@ type MCPServerConfig struct {
 // (rather than imported) so wconfig stays at the bottom of the import
 // graph. The agent-side backend translates between this and the
 // permissions package's own type.
+//
+// DUPLICATED IN: pkg/agent/permissions/store.go. Keep field set in
+// sync; pkg/agent/permissions_userscope.go's Load/Save copies
+// field-by-field and silently drops anything that exists on only one
+// side.
 type AIPermissionsConfig struct {
 	Allow          []string `json:"allow,omitempty"`
 	Deny           []string `json:"deny,omitempty"`
 	Ask            []string `json:"ask,omitempty"`
-	DefaultPosture string   `json:"defaultPosture,omitempty"`
+	DefaultPosture string   `json:"defaultPosture,omitempty" jsonschema:"enum=default,enum=acceptEdits,enum=bypass"`
 }
 
 func (c MCPServerConfig) IsEnabled() bool {

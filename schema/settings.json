@@ -24,7 +24,12 @@
           "type": "array"
         },
         "defaultPosture": {
-          "type": "string"
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "bypass"
+          ]
         }
       },
       "additionalProperties": false,

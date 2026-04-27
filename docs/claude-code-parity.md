@@ -110,13 +110,20 @@ questions resolved; ready to implement.
   (`.crest/permissions.local.json`) → session
 - Modes become rule presets, not parallel rule namespaces — one rule
   pool, modes flip default posture
-- New `bypassPermissions` mode (Claude's name) for interactive
-  "trust me" — separate from `bench`. Both auto-approve, but only
-  `bypassPermissions` keeps bypass-immune safety checks; `bench`
-  skips them so eval harnesses can do destructive things in
-  sandboxes. **`bench` is hidden from the user-facing mode picker**
-  (Harbor / API-only) so a casual user can't trip into it. No gating
-  flag — picking a visible mode is the consent.
+- **Mode and Permission Posture are split into two orthogonal axes**
+  (this was the bigger structural lesson from Claude Code's design):
+  - Mode (work axis): `ask` / `plan` / `do` — visible in the mode
+    picker. `bench` is a fourth mode but hidden, API-only, used by
+    eval harnesses.
+  - Posture (strictness axis): `default` / `acceptEdits` /
+    `bypassPermissions` — toggled via Shift+Tab cycle or
+    `/permission` slash command. Status pill shows current posture in
+    the agent overlay header. Bench mode implicitly forces a hidden
+    `bench` posture that skips even bypass-immune safety checks.
+  - Posture is per-chat state with `defaultPosture` setting for new
+    chats. Posture only affects calls the rule engine would otherwise
+    *ask* about — bypass-immune paths still prompt under any
+    user-selectable posture.
 - Bypass-immune safety checks: `.git/`, `.ssh/`, `.env`, `rm -rf /`,
   `curl|sh`, `sudo`, etc. force a prompt in `bypassPermissions`.
 - Approval prompt default "save to" = `session` (least commitment).
@@ -200,6 +207,7 @@ beyond positional strings.
 | 2026-04-27 | Context collapse via opt-in `ToolResultCollapsible` interface, not a Backend method | Same pattern as `MessageDependsOnPrev`; only the message types that carry tool results need to opt in, no new method on the Backend interface |
 | 2026-04-27 | Heavy-summary file list pulled from `metrics.AuditLog`, not chatstore-tracked | Audit log already exists; threading it into chatstore would need an interface change for marginal benefit |
 | 2026-04-27 | Permissions v2 — `bench` and `bypassPermissions` are distinct modes | They look similar (auto-approve) but serve different audiences. Bench has *no* safety checks (eval harness can do whatever); bypass keeps bypass-immune ones (interactive "trust me"). Bench hidden from user picker so a casual user can't trip into a no-safety mode. |
+| 2026-04-27 | Permissions v2 — Mode and Posture are orthogonal axes | Conflating them (single picker with `ask`/`plan`/`do`/`bypassPermissions`) mixes work mode with permission strictness. Split: Mode = tools/prompt/budget; Posture = strictness. Posture set: `default` / `acceptEdits` / `bypassPermissions` + hidden `bench`, toggled via Shift+Tab. |
 | 2026-04-27 | Permissions v2 — rules in standalone `pkg/agent/permissions` package | Clean cycle story; engine reusable beyond the agent loop |
 | 2026-04-27 | Permissions v2 — defer classifier to v2 | Rules-first ships value sooner; classifier needs prompt design + gating |
 

@@ -10,8 +10,8 @@ import (
 	"log"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 // Buffer size for the output channel

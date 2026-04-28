@@ -9,10 +9,10 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wcore"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wcore"
+	"github.com/s-zx/crest/pkg/wstore"
 )
 
 type WebNavigateToolInput struct {

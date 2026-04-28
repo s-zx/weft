@@ -1,0 +1,38 @@
+{
+  "name": "plan-read-then-plan",
+  "description": "Agent reads a file first, then writes a plan based on its contents",
+  "mode": "plan",
+  "setup": {
+    "files": {
+      "main.go": "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n\n// TODO: add error handling\n// TODO: add logging\n// TODO: add config file support"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read main.go and create a plan to address all the TODO items.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/main.go"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_plan", "input": {"title": "Address TODOs in main.go", "content": "## Overview\nThe main.go file has three TODO items that need to be addressed.\n\n## Steps\n1. Add error handling: wrap operations in error checks, create a central error handler, and return meaningful exit codes\n2. Add logging: integrate the slog package, add structured log calls at key points, and configure log levels\n3. Add config file support: create a config struct, add YAML parsing with a default config path, and load config at startup"}}
+          ]
+        },
+        {
+          "text": "I read main.go and identified three TODOs. The plan covers adding error handling, structured logging, and config file support."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file", "write_plan"],
+    "files_contain": {
+      ".crest-plans/address-todos-in-main-go.md": "Add error handling"
+    }
+  }
+}

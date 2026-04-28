@@ -10,14 +10,14 @@ import (
 	"encoding/json"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/baseds"
-	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
-	"github.com/wavetermdev/waveterm/pkg/telemetry/telemetrydata"
-	"github.com/wavetermdev/waveterm/pkg/vdom"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wps"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/baseds"
+	"github.com/s-zx/crest/pkg/cmdblock/cbtypes"
+	"github.com/s-zx/crest/pkg/telemetry/telemetrydata"
+	"github.com/s-zx/crest/pkg/vdom"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wps"
 )
 
 type RespOrErrorUnion[T any] struct {
@@ -138,6 +138,8 @@ type WshRpcInterface interface {
 
 	// emain
 	WebSelectorCommand(ctx context.Context, data CommandWebSelectorData) ([]string, error)
+	WebClickCommand(ctx context.Context, data CommandWebClickData) (bool, error)
+	WebScreenshotCommand(ctx context.Context, data CommandWebScreenshotData) (string, error)
 	NotifyCommand(ctx context.Context, notificationOptions WaveNotificationOptions) error
 	FocusWindowCommand(ctx context.Context, windowId string) error
 	ElectronEncryptCommand(ctx context.Context, data CommandElectronEncryptData) (*CommandElectronEncryptRtnData, error)
@@ -162,10 +164,11 @@ type WshRpcInterface interface {
 	AiSendMessageCommand(ctx context.Context, data AiMessageData) error
 	WaveAIEnableTelemetryCommand(ctx context.Context) error
 	GetWaveAIChatCommand(ctx context.Context, data CommandGetWaveAIChatData) (*uctypes.UIChat, error)
-	GetWaveAIRateLimitCommand(ctx context.Context) (*uctypes.RateLimitInfo, error)
 	WaveAIToolApproveCommand(ctx context.Context, data CommandWaveAIToolApproveData) error
 	WaveAIAddContextCommand(ctx context.Context, data CommandWaveAIAddContextData) error
 	WaveAIGetToolDiffCommand(ctx context.Context, data CommandWaveAIGetToolDiffData) (*CommandWaveAIGetToolDiffRtnData, error)
+	ListProviderModelsCommand(ctx context.Context, data CommandListProviderModelsData) (*CommandListProviderModelsRtnData, error)
+	ShowBlockCommand(ctx context.Context, data CommandShowBlockData) error
 
 	// screenshot
 	CaptureBlockScreenshotCommand(ctx context.Context, data CommandCaptureBlockScreenshotData) (string, error)
@@ -496,6 +499,19 @@ type CommandWebSelectorData struct {
 	Opts        *WebSelectorOpts `json:"opts,omitempty"`
 }
 
+type CommandWebClickData struct {
+	WorkspaceId string `json:"workspaceid"`
+	BlockId     string `json:"blockid"`
+	TabId       string `json:"tabid"`
+	Selector    string `json:"selector"`
+}
+
+type CommandWebScreenshotData struct {
+	WorkspaceId string `json:"workspaceid"`
+	BlockId     string `json:"blockid"`
+	TabId       string `json:"tabid"`
+}
+
 type BlockInfoData struct {
 	BlockId     string          `json:"blockid"`
 	TabId       string          `json:"tabid"`
@@ -558,8 +574,17 @@ type CommandGetWaveAIChatData struct {
 }
 
 type CommandWaveAIToolApproveData struct {
+	ChatId     string `json:"chatid,omitempty"`
 	ToolCallId string `json:"toolcallid"`
 	Approval   string `json:"approval,omitempty"`
+	// Optional: when the user clicks "Approve and Remember", these
+	// fields carry the chosen suggestion + destination so the server
+	// can persist a permission rule alongside approving this single
+	// call.
+	AcceptedToolName    string `json:"acceptedtoolname,omitempty"`
+	AcceptedContent     string `json:"acceptedcontent,omitempty"`
+	AcceptedDestination string `json:"accepteddestination,omitempty"` // "session" | "localProject" | "sharedProject" | "user"
+	Cwd                 string `json:"cwd,omitempty"`                  // required for project-scope persistence
 }
 
 type AIAttachedFile struct {
@@ -584,6 +609,45 @@ type CommandWaveAIGetToolDiffData struct {
 type CommandWaveAIGetToolDiffRtnData struct {
 	OriginalContents64 string `json:"originalcontents64"`
 	ModifiedContents64 string `json:"modifiedcontents64"`
+}
+
+// CommandListProviderModelsData lists models a provider exposes via its
+// /models endpoint. The request carries the user's *current* (unsaved)
+// inputs from the AI Provider settings UI so they can preview a model
+// list before persisting the form.
+type CommandListProviderModelsData struct {
+	APIType  string `json:"apitype"`            // "openai-chat" / "anthropic-messages" / "google-gemini"
+	BaseURL  string `json:"baseurl,omitempty"`  // chat-completions URL; we strip the suffix to find /models
+	APIToken string `json:"apitoken,omitempty"` // bearer / x-api-key / google query-string key
+}
+
+// ProviderModelInfo is the shape we return to the FE — a slim, normalized
+// view of the per-provider /models response. Most providers carry more
+// fields (pricing, features) but the FE picker only needs id + name +
+// context size for display and selection.
+type ProviderModelInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Context     int    `json:"context,omitempty"`
+}
+
+type CommandListProviderModelsRtnData struct {
+	Models []ProviderModelInfo `json:"models"`
+}
+
+// CommandShowBlockData attaches an existing (already-created, possibly
+// hidden) block into a tab's layout. Used by background shell_exec to
+// let the user opt in to viewing a running process: the block is
+// created with the process running, but layout is deferred until the
+// user clicks "Open block" on the tool-use card. TabId is required;
+// TargetBlockId is optional (defaults to a top-level insert).
+type CommandShowBlockData struct {
+	BlockId       string `json:"blockid"`
+	TabId         string `json:"tabid"`
+	TargetBlockId string `json:"targetblockid,omitempty"`
+	TargetAction  string `json:"targetaction,omitempty"` // splitdown / splitright / splitup / splitleft / insert
+	Focused       bool   `json:"focused,omitempty"`
 }
 
 type CommandCaptureBlockScreenshotData struct {

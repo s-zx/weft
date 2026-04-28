@@ -1,0 +1,32 @@
+{
+  "name": "ask-list-dir",
+  "description": "Agent lists directory contents to answer a question",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "src/main.go": "package main",
+      "src/util.go": "package main",
+      "README.md": "# Project"
+    }
+  },
+  "turns": [
+    {
+      "user": "What files are in this project?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_dir", "input": {"path": "{{CWD}}"}}
+          ]
+        },
+        {
+          "text": "The project contains: README.md and a src/ directory with main.go and util.go."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_dir"],
+    "final_text_contains": ["README.md"]
+  }
+}

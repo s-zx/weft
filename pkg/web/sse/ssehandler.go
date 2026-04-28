@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wavetermdev/waveterm/pkg/utilds"
+	"github.com/s-zx/crest/pkg/utilds"
 )
 
 // see /aiprompts/usechat-streamingproto.md for protocol
@@ -89,17 +89,55 @@ func MakeSSEHandlerCh(w http.ResponseWriter, ctx context.Context) *SSEHandlerCh 
 	}
 }
 
+// MakeDiscardSSEHandlerCh creates a headless SSE handler that drains all messages
+// without writing anywhere. Used for sub-agents that should not stream to a frontend
+// but still need a working sseHandler so RunAIChat's queue calls don't back up and
+// onClose hooks (approval cancel) still fire when the parent context is cancelled.
+func MakeDiscardSSEHandlerCh(ctx context.Context) *SSEHandlerCh {
+	h := &SSEHandlerCh{
+		ctx:         ctx,
+		writeCh:     make(chan SSEMessage, 10),
+		initialized: true,
+	}
+	h.wg.Add(1)
+	go h.discardLoop()
+	return h
+}
+
+func (h *SSEHandlerCh) discardLoop() {
+	defer h.wg.Done()
+	defer h.runOnCloseHandlers()
+	for {
+		select {
+		case _, ok := <-h.writeCh:
+			if !ok {
+				return
+			}
+		case <-h.ctx.Done():
+			h.setError(h.ctx.Err())
+			return
+		}
+	}
+}
+
 func (h *SSEHandlerCh) Context() context.Context {
 	return h.ctx
 }
 
-// SetupSSE configures the response headers and starts the writer goroutine
+// SetupSSE configures the response headers and starts the writer goroutine.
+// Idempotent: a second call after a successful first one is a no-op. This
+// lets the HTTP handler set up SSE up front (so errors from any layer can
+// be surfaced as error chunks) while still allowing backends to call
+// SetupSSE in their happy paths without blowing up.
 func (h *SSEHandlerCh) SetupSSE() error {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
 	if h.closed {
 		return fmt.Errorf("SSE handler is closed")
+	}
+	if h.initialized {
+		return nil
 	}
 
 	h.initialized = true

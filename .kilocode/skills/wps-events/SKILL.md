@@ -119,7 +119,7 @@ This will update `frontend/types/gotypes.d.ts` with TypeScript definitions for y
 To publish an event, use the global broker:
 
 ```go
-import "github.com/wavetermdev/waveterm/pkg/wps"
+import "github.com/s-zx/crest/pkg/wps"
 
 wps.Broker.Publish(wps.WaveEvent{
     Event: wps.Event_YourNewEvent,
@@ -190,7 +190,7 @@ const (
 In `pkg/aiusechat/usechat.go`:
 
 ```go
-import "github.com/wavetermdev/waveterm/pkg/wps"
+import "github.com/s-zx/crest/pkg/wps"
 
 func updateRateLimit(info *uctypes.RateLimitInfo) {
     if info == nil {

@@ -1,0 +1,30 @@
+{
+  "name": "ask-read-then-summarize",
+  "description": "Agent reads a code file and provides a summary of its purpose",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "server.go": "package main\n\nimport (\n\t\"fmt\"\n\t\"net/http\"\n)\n\nfunc healthHandler(w http.ResponseWriter, r *http.Request) {\n\tw.WriteHeader(http.StatusOK)\n\tfmt.Fprintf(w, \"ok\")\n}\n\nfunc main() {\n\thttp.HandleFunc(\"/health\", healthHandler)\n\thttp.ListenAndServe(\":9090\", nil)\n}"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read server.go and summarize what it does.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/server.go"}}
+          ]
+        },
+        {
+          "text": "server.go is a simple Go HTTP server that listens on port 9090 and exposes a single /health endpoint. The health handler responds with HTTP 200 and the text \"ok\", making it suitable as a basic health check service."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file"],
+    "final_text_contains": ["9090", "health"]
+  }
+}

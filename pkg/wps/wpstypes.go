@@ -4,7 +4,7 @@
 package wps
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 // IMPORTANT: When adding a new event constant, you MUST also:
@@ -28,10 +28,8 @@ const (
 	Event_RouteDown           = "route:down"           // type: none
 	Event_RouteUp             = "route:up"             // type: none
 	Event_WorkspaceUpdate     = "workspace:update"     // type: none
-	Event_WaveAIRateLimit     = "waveai:ratelimit"     // type: *uctypes.RateLimitInfo
 	Event_WaveAppAppGoUpdated = "waveapp:appgoupdated" // type: none
 	Event_TsunamiUpdateMeta   = "tsunami:updatemeta"   // type: wshrpc.AppMeta
-	Event_AIModeConfig        = "waveai:modeconfig"    // type: wconfig.AIModeConfigUpdate
 	Event_BlockJobStatus      = "block:jobstatus"      // type: wshrpc.BlockJobStatusData
 	Event_Badge               = "badge"                // type: baseds.BadgeEvent
 	Event_CmdBlockRow         = "cmdblock:row"         // type: *cbtypes.CmdBlock
@@ -55,10 +53,8 @@ var AllEvents []string = []string{
 	Event_RouteDown,
 	Event_RouteUp,
 	Event_WorkspaceUpdate,
-	Event_WaveAIRateLimit,
 	Event_WaveAppAppGoUpdated,
 	Event_TsunamiUpdateMeta,
-	Event_AIModeConfig,
 	Event_BlockJobStatus,
 	Event_Badge,
 	Event_CmdBlockRow,

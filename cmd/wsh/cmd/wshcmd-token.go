@@ -7,7 +7,7 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/wavetermdev/waveterm/pkg/util/shellutil"
+	"github.com/s-zx/crest/pkg/util/shellutil"
 )
 
 var tokenCmd = &cobra.Command{

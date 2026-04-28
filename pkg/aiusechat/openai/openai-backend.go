@@ -10,36 +10,24 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/launchdarkly/eventsource"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/util/logutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/web/sse"
+	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/logutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/web/sse"
 )
 
-// sanitizeHostnameInError removes the Wave cloud hostname from error messages
+// sanitizeHostnameInError strips provider endpoint hostnames from error messages
+// to avoid leaking internal URLs to the user.
 func sanitizeHostnameInError(err error) error {
-	if err == nil {
-		return nil
-	}
-
-	errStr := err.Error()
-	parsedURL, parseErr := url.Parse(uctypes.DefaultAIEndpoint)
-	if parseErr == nil && parsedURL.Host != "" {
-		if strings.Contains(errStr, parsedURL.Host) {
-			errStr = strings.ReplaceAll(errStr, uctypes.DefaultAIEndpoint, "AI service")
-			errStr = strings.ReplaceAll(errStr, parsedURL.Host, "host")
-		}
-	}
-
-	return fmt.Errorf("%s", errStr)
+	return err
 }
 
 // ---------- OpenAI wire types (subset) ----------
@@ -144,6 +132,29 @@ func (m *OpenAIChatMessage) GetRole() string {
 		return m.Message.Role
 	}
 	return ""
+}
+
+func (m *OpenAIChatMessage) DependsOnPrev() bool {
+	if m == nil {
+		return false
+	}
+	return m.FunctionCallOutput != nil
+}
+
+// CollapseToolResults replaces a function_call_output's Output payload
+// with the placeholder string. CallId is preserved so the pairing with
+// the prior function_call stays valid. Non-function-call-output messages
+// (assistant text, user input, function_call) are no-ops — collapse only
+// touches the bulky tool result side of pairs.
+func (m *OpenAIChatMessage) CollapseToolResults(placeholder string) int {
+	if m == nil || m.FunctionCallOutput == nil {
+		return 0
+	}
+	if existing, ok := m.FunctionCallOutput.Output.(string); ok && len(existing) <= len(placeholder) {
+		return 0
+	}
+	m.FunctionCallOutput.Output = placeholder
+	return 1
 }
 
 func (m *OpenAIChatMessage) GetUsage() *uctypes.AIUsage {
@@ -409,34 +420,31 @@ type openaiStreamingState struct {
 // ---------- Public entrypoint ----------
 
 func UpdateToolUseData(chatId string, callId string, newToolUseData uctypes.UIMessageDataToolUse) error {
-	chat := chatstore.DefaultChatStore.Get(chatId)
-	if chat == nil {
-		return fmt.Errorf("chat not found: %s", chatId)
-	}
-
-	for _, genMsg := range chat.NativeMessages {
-		chatMsg, ok := genMsg.(*OpenAIChatMessage)
+	messageId, found := chatstore.DefaultChatStore.FindMessageIdByPredicate(chatId, func(m uctypes.GenAIMessage) bool {
+		chatMsg, ok := m.(*OpenAIChatMessage)
 		if !ok {
-			continue
+			return false
 		}
-
-		if chatMsg.FunctionCall != nil && chatMsg.FunctionCall.CallId == callId {
-			updatedMsg := *chatMsg
-			updatedFunctionCall := *chatMsg.FunctionCall
-			updatedFunctionCall.ToolUseData = &newToolUseData
-			updatedMsg.FunctionCall = &updatedFunctionCall
-
-			aiOpts := &uctypes.AIOptsType{
-				APIType:    chat.APIType,
-				Model:      chat.Model,
-				APIVersion: chat.APIVersion,
-			}
-
-			return chatstore.DefaultChatStore.PostMessage(chatId, aiOpts, &updatedMsg)
-		}
+		return chatMsg.FunctionCall != nil && chatMsg.FunctionCall.CallId == callId
+	})
+	if !found {
+		return fmt.Errorf("function call with callId %s not found in chat %s", callId, chatId)
 	}
-
-	return fmt.Errorf("function call with callId %s not found in chat %s", callId, chatId)
+	updated := chatstore.DefaultChatStore.UpdateMessage(chatId, messageId, func(m uctypes.GenAIMessage) uctypes.GenAIMessage {
+		chatMsg, ok := m.(*OpenAIChatMessage)
+		if !ok || chatMsg.FunctionCall == nil || chatMsg.FunctionCall.CallId != callId {
+			return nil
+		}
+		updatedMsg := *chatMsg
+		updatedFunctionCall := *chatMsg.FunctionCall
+		updatedFunctionCall.ToolUseData = &newToolUseData
+		updatedMsg.FunctionCall = &updatedFunctionCall
+		return &updatedMsg
+	})
+	if !updated {
+		return fmt.Errorf("function call with callId %s vanished during update in chat %s", callId, chatId)
+	}
+	return nil
 }
 
 func RemoveToolUseCall(chatId string, callId string) error {
@@ -465,26 +473,26 @@ func RunOpenAIChatStep(
 	sse *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []*OpenAIChatMessage, *uctypes.RateLimitInfo, error) {
+) (*uctypes.WaveStopReason, []*OpenAIChatMessage, error) {
 	if sse == nil {
-		return nil, nil, nil, errors.New("sse handler is nil")
+		return nil, nil, errors.New("sse handler is nil")
 	}
 
 	// Get chat from store
 	chat := chatstore.DefaultChatStore.Get(chatOpts.ChatId)
 	if chat == nil {
-		return nil, nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
+		return nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
 	}
 
 	// Validate that chatOpts.Config match the chat's stored configuration
 	if chat.APIType != chatOpts.Config.APIType {
-		return nil, nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
+		return nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
 	}
 	if !uctypes.AreModelsCompatible(chat.APIType, chat.Model, chatOpts.Config.Model) {
-		return nil, nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
+		return nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
 	}
 	if chat.APIVersion != chatOpts.Config.APIVersion {
-		return nil, nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
+		return nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
 	}
 
 	// Context with timeout if provided.
@@ -497,7 +505,7 @@ func RunOpenAIChatStep(
 	// Validate continuation if provided
 	if cont != nil {
 		if !uctypes.AreModelsCompatible(chat.APIType, chatOpts.Config.Model, cont.Model) {
-			return nil, nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
+			return nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
 		}
 	}
 
@@ -507,7 +515,7 @@ func RunOpenAIChatStep(
 		// Cast to OpenAIChatMessage
 		chatMsg, ok := genMsg.(*OpenAIChatMessage)
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("expected OpenAIChatMessage, got %T", genMsg)
+			return nil, nil, fmt.Errorf("expected OpenAIChatMessage, got %T", genMsg)
 		}
 
 		// Convert to appropriate input type based on what's populated
@@ -525,43 +533,23 @@ func RunOpenAIChatStep(
 
 	req, err := buildOpenAIHTTPRequest(ctx, inputs, chatOpts, cont)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	httpClient, err := aiutil.MakeHTTPClient(chatOpts.Config.ProxyURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpretry.Do(ctx, httpClient, req, httpretry.DefaultConfig(), "openai")
 	if err != nil {
-		return nil, nil, nil, sanitizeHostnameInError(err)
+		return nil, nil, sanitizeHostnameInError(err)
 	}
 	defer resp.Body.Close()
 
-	// Parse rate limit info from header if present (do this before error check)
-	rateLimitInfo := uctypes.ParseRateLimitHeader(resp.Header.Get("X-Wave-RateLimit"))
-
 	ct := resp.Header.Get("Content-Type")
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
-		// Handle 429 rate limit with special logic
-		if resp.StatusCode == http.StatusTooManyRequests && rateLimitInfo != nil {
-			if rateLimitInfo.PReq == 0 && rateLimitInfo.Req > 0 {
-				// Premium requests exhausted, but regular requests available
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindPremiumRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-			if rateLimitInfo.Req == 0 {
-				// All requests exhausted
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-		}
-		return nil, nil, rateLimitInfo, parseOpenAIHTTPError(resp)
+		return nil, nil, parseOpenAIHTTPError(resp)
 	}
 
 	// At this point we have a valid SSE stream, so setup SSE handling
@@ -574,7 +562,7 @@ func RunOpenAIChatStep(
 	decoder := eventsource.NewDecoder(resp.Body)
 
 	stopReason, rtnMessages := handleOpenAIStreamingResp(ctx, sse, decoder, cont, chatOpts)
-	return stopReason, rtnMessages, rateLimitInfo, nil
+	return stopReason, rtnMessages, nil
 }
 
 // parseOpenAIHTTPError parses OpenAI API HTTP error responses

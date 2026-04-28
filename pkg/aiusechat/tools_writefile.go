@@ -8,11 +8,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/filebackup"
-	"github.com/wavetermdev/waveterm/pkg/util/fileutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/filebackup"
+	"github.com/s-zx/crest/pkg/util/fileutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wavebase"
 )
 
 const MaxEditFileSize = 100 * 1024 // 100KB
@@ -126,7 +126,15 @@ func verifyWriteTextFileInput(input any, toolUseData *uctypes.UIMessageDataToolU
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
+
+	existing, readErr := os.ReadFile(expandedPath)
+	if readErr != nil && !os.IsNotExist(readErr) {
+		return fmt.Errorf("failed to read existing file for diff: %w", readErr)
+	}
+	toolUseData.OriginalContent = string(existing)
+	toolUseData.ModifiedContent = params.Contents
+
 	return nil
 }
 
@@ -264,7 +272,14 @@ func verifyEditTextFileInput(input any, toolUseData *uctypes.UIMessageDataToolUs
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
+
+	original, modified, dryRunErr := EditTextFileDryRun(input, "")
+	if dryRunErr == nil {
+		toolUseData.OriginalContent = string(original)
+		toolUseData.ModifiedContent = string(modified)
+	}
+
 	return nil
 }
 
@@ -451,7 +466,7 @@ func verifyDeleteTextFileInput(input any, toolUseData *uctypes.UIMessageDataTool
 		return err
 	}
 
-	toolUseData.InputFileName = params.Filename
+	toolUseData.InputFileName = expandedPath
 	return nil
 }
 

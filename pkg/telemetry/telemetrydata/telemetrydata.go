@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 var ValidEventNames = map[string]bool{
@@ -25,8 +25,7 @@ var ValidEventNames = map[string]bool{
 	"action:runaicmd":    true,
 	"action:createtab":   true,
 	"action:createblock": true,
-	"action:openwaveai":  true,
-	"action:other":       true,
+	"action:other": true,
 	"action:term":        true,
 	"action:termdurable": true,
 	"action:link":        true,
@@ -39,11 +38,7 @@ var ValidEventNames = map[string]bool{
 	"conn:connecterror": true,
 	"conn:nowsh":        true,
 
-	"waveai:enabletelemetry": true,
-	"waveai:post":            true,
-	"waveai:feedback":        true,
-	"waveai:showdiff":        true,
-	"waveai:revertfile":      true,
+	"waveai:post": true,
 
 	"onboarding:start":      true,
 	"onboarding:skip":       true,
@@ -91,9 +86,8 @@ type TEventUserProps struct {
 	LocCountryCode string `json:"loc:countrycode,omitempty"`
 	LocRegionCode  string `json:"loc:regioncode,omitempty"`
 
-	SettingsCustomWidgets   int  `json:"settings:customwidgets,omitempty"`
-	SettingsCustomAIPresets int  `json:"settings:customaipresets,omitempty"`
-	SettingsCustomSettings  int  `json:"settings:customsettings,omitempty"`
+	SettingsCustomWidgets  int `json:"settings:customwidgets,omitempty"`
+	SettingsCustomSettings int `json:"settings:customsettings,omitempty"`
 	SettingsCustomAIModes   int  `json:"settings:customaimodes,omitempty"`
 	SettingsSecretsCount    int  `json:"settings:secretscount,omitempty"`
 	SettingsTransparent     bool `json:"settings:transparent,omitempty"`
@@ -168,9 +162,7 @@ type TEventProps struct {
 	WaveAIToolUseCount         int            `json:"waveai:toolusecount,omitempty"`
 	WaveAIToolUseErrorCount    int            `json:"waveai:tooluseerrorcount,omitempty"`
 	WaveAIToolDetail           map[string]int `json:"waveai:tooldetail,omitempty"`
-	WaveAIPremiumReq           int            `json:"waveai:premiumreq,omitempty"`
-	WaveAIProxyReq             int            `json:"waveai:proxyreq,omitempty"`
-	WaveAIHadError             bool           `json:"waveai:haderror,omitempty"`
+	WaveAIHadError bool `json:"waveai:haderror,omitempty"`
 	WaveAIImageCount           int            `json:"waveai:imagecount,omitempty"`
 	WaveAIPDFCount             int            `json:"waveai:pdfcount,omitempty"`
 	WaveAITextDocCount         int            `json:"waveai:textdoccount,omitempty"`
@@ -182,8 +174,7 @@ type TEventProps struct {
 	WaveAIMode                 string         `json:"waveai:mode,omitempty"`
 	WaveAIProvider             string         `json:"waveai:provider,omitempty"`
 	WaveAIIsLocal              bool           `json:"waveai:islocal,omitempty"`
-	WaveAIFeedback             string         `json:"waveai:feedback,omitempty" tstype:"\"good\" | \"bad\""`
-	WaveAIAction               string         `json:"waveai:action,omitempty"`
+	WaveAIAction string `json:"waveai:action,omitempty"`
 
 	JobDoneReason string `json:"job:donereason,omitempty"`
 	JobKind       string `json:"job:kind,omitempty"`

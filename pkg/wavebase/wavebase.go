@@ -18,7 +18,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 // set by main-server.go

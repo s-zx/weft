@@ -48,3 +48,8 @@ ROADMAP-v2.md
 
 # Agent run-time traces — local diagnostic dumps, not source
 .crest-trajectories/
+
+# TB2 benchmark results
+jobs/
+__pycache__/
+.env

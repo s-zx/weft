@@ -11,9 +11,9 @@ import (
 	"sync"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/wavetermdev/waveterm/pkg/panichandler"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wps"
+	"github.com/s-zx/crest/pkg/panichandler"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wps"
 )
 
 var instance *Watcher

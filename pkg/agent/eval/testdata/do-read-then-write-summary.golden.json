@@ -1,0 +1,39 @@
+{
+  "name": "do-read-then-write-summary",
+  "description": "Agent reads a code file and writes a summary file based on it",
+  "mode": "do",
+  "setup": {
+    "files": {
+      "app.py": "from flask import Flask, jsonify\n\napp = Flask(__name__)\n\n@app.route('/api/users')\ndef get_users():\n    return jsonify([{'id': 1, 'name': 'Alice'}, {'id': 2, 'name': 'Bob'}])\n\n@app.route('/api/health')\ndef health():\n    return jsonify({'status': 'ok'})\n\nif __name__ == '__main__':\n    app.run(port=5000)"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read app.py and create a summary.txt describing the API endpoints.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/app.py"}}
+          ]
+        },
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/summary.txt", "contents": "API Summary for app.py\n\nEndpoints:\n  GET /api/users  - Returns a JSON list of users (id and name)\n  GET /api/health - Returns a JSON health status object\n\nServer runs on port 5000."}}
+          ]
+        },
+        {
+          "text": "Read app.py and created summary.txt with a description of its two API endpoints."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file", "write_text_file"],
+    "files_created": ["summary.txt"],
+    "files_contain": {
+      "summary.txt": "GET /api/users"
+    }
+  }
+}

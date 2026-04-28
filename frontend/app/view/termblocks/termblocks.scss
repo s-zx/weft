@@ -128,10 +128,7 @@
     border-radius: 4px;
     cursor: pointer;
     opacity: 0;
-    transition:
-        opacity 120ms ease,
-        background 120ms ease,
-        color 120ms ease;
+    transition: opacity 120ms ease, background 120ms ease, color 120ms ease;
     font-size: 12px;
     z-index: 2;
 }
@@ -223,309 +220,6 @@
     margin: 1px 0 4px;
 }
 
-.termblocks-agent-card {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-    background:
-        linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
-        linear-gradient(135deg, rgba(184, 242, 192, 0.035), rgba(64, 196, 255, 0.03));
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-left: 3px solid rgba(184, 242, 192, 0.6);
-    border-radius: 0;
-    overflow: hidden;
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
-}
-
-.termblocks-agent-card-streaming {
-    border-left-color: var(--tb-running);
-}
-
-.termblocks-agent-card-draft {
-    border-left-color: rgba(255, 255, 255, 0.35);
-}
-
-.termblocks-agent-card-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 9px 14px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(0, 0, 0, 0.18);
-}
-
-.termblocks-agent-card-title {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-
-.termblocks-agent-kicker {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    line-height: 1;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.72);
-}
-
-.termblocks-agent-mode,
-.termblocks-agent-live {
-    display: inline-flex;
-    align-items: center;
-    min-height: 20px;
-    padding: 0 8px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    line-height: 1;
-    color: rgba(255, 255, 255, 0.8);
-    background: rgba(255, 255, 255, 0.03);
-}
-
-.termblocks-agent-live {
-    border-color: rgba(64, 196, 255, 0.28);
-    color: var(--tb-running);
-    background: rgba(64, 196, 255, 0.08);
-}
-
-.termblocks-agent-request,
-.termblocks-agent-response {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    padding: 12px 14px;
-}
-
-.termblocks-agent-request {
-    background: linear-gradient(180deg, rgba(184, 242, 192, 0.08), rgba(184, 242, 192, 0.02));
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.termblocks-agent-response {
-    background: rgba(255, 255, 255, 0.012);
-}
-
-.termblocks-agent-label {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 10px;
-    line-height: 1;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(255, 255, 255, 0.45);
-}
-
-.termblocks-agent-request-text {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.96);
-    white-space: pre-wrap;
-    word-break: break-word;
-}
-
-.termblocks-agent-response-body,
-.termblocks-agent-message {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.termblocks-agent-placeholder {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-}
-
-.termblocks-agent-markdown {
-    color: rgba(255, 255, 255, 0.92);
-    font-size: 13px;
-    line-height: 1.55;
-
-    p,
-    ul,
-    ol,
-    blockquote {
-        margin: 0;
-    }
-
-    p + p,
-    p + pre,
-    pre + p,
-    ul + p,
-    ol + p,
-    p + ul,
-    p + ol,
-    blockquote + p,
-    p + blockquote {
-        margin-top: 0.7em;
-    }
-
-    code {
-        font-family: ui-monospace, Menlo, Consolas, monospace;
-    }
-
-    pre {
-        margin: 0;
-        padding: 10px 12px;
-        background: rgba(0, 0, 0, 0.34);
-        border: 1px solid rgba(255, 255, 255, 0.07);
-        overflow-x: auto;
-    }
-}
-
-.termblocks-agent-reasoning {
-    padding: 9px 11px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background: rgba(255, 255, 255, 0.025);
-    color: rgba(255, 255, 255, 0.72);
-
-    summary {
-        cursor: pointer;
-        user-select: none;
-        font-family: ui-monospace, Menlo, Consolas, monospace;
-        font-size: 11px;
-    }
-}
-
-.termblocks-agent-reasoning-body {
-    margin-top: 8px;
-    white-space: pre-wrap;
-    font-size: 12px;
-    line-height: 1.5;
-}
-
-.termblocks-agent-tooluse,
-.termblocks-agent-progress {
-    padding: 10px 12px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background: rgba(0, 0, 0, 0.22);
-}
-
-.termblocks-agent-tooluse-head {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-}
-
-.termblocks-agent-tooluse-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 16px;
-    min-width: 16px;
-    height: 16px;
-    font-size: 12px;
-    line-height: 1;
-}
-
-.termblocks-agent-tooluse-dot.is-done {
-    color: var(--tb-diff-add);
-}
-
-.termblocks-agent-tooluse-dot.is-error {
-    color: var(--tb-error);
-}
-
-.termblocks-agent-tooluse-dot.is-pending {
-    color: var(--tb-running);
-}
-
-.termblocks-agent-tooluse-copy {
-    min-width: 0;
-}
-
-.termblocks-agent-tooluse-title {
-    color: rgba(255, 255, 255, 0.94);
-    font-size: 13px;
-    line-height: 1.35;
-}
-
-.termblocks-agent-tooluse-name {
-    margin-top: 2px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.45);
-}
-
-.termblocks-agent-progress {
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.45;
-    color: rgba(255, 255, 255, 0.72);
-}
-
-.termblocks-agent-actions {
-    display: flex;
-    gap: 8px;
-    margin-top: 10px;
-}
-
-.termblocks-agent-button {
-    border: 1px solid rgba(184, 242, 192, 0.25);
-    background: rgba(184, 242, 192, 0.06);
-    color: rgba(255, 255, 255, 0.88);
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    padding: 6px 10px;
-    cursor: pointer;
-
-    &:hover {
-        border-color: rgba(184, 242, 192, 0.45);
-        background: rgba(184, 242, 192, 0.11);
-    }
-}
-
-.termblocks-agent-button-danger {
-    border-color: rgba(229, 115, 115, 0.25);
-    background: rgba(229, 115, 115, 0.05);
-
-    &:hover {
-        border-color: rgba(229, 115, 115, 0.4);
-        background: rgba(229, 115, 115, 0.1);
-    }
-}
-
-.termblocks-agent-error {
-    color: #f19a9a;
-    font-size: 12px;
-    line-height: 1.45;
-}
-
-.termblocks-agent-textarea {
-    width: 100%;
-    min-height: 24px;
-    max-height: 240px;
-    resize: none;
-    overflow-y: auto;
-    background: transparent;
-    border: none;
-    outline: none;
-    padding: 0;
-    color: rgba(255, 255, 255, 0.95);
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.5;
-
-    &::placeholder {
-        color: rgba(255, 255, 255, 0.28);
-    }
-}
-
-.termblocks-agent-composer-foot {
-    display: flex;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 0 14px 12px;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 11px;
-    line-height: 1.4;
-    color: rgba(255, 255, 255, 0.42);
-}
-
 .termblocks-xterm {
     background: transparent;
     padding: 0;
@@ -609,11 +303,13 @@
     margin-left: 2px;
 }
 
-// Input row — no border-top, no prompt symbol; lives inside the card
+// Input row — no border-top, no prompt symbol; lives inside the card.
+// align-items: flex-start so the textarea can grow downward while the
+// row's other children (if any are added later) stay top-aligned.
 .termblocks-input-row {
     flex: 0 0 auto;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     padding: 4px 12px 10px;
 }
 
@@ -621,27 +317,32 @@
     flex: 1 1 auto;
     position: relative;
     min-width: 0;
-    display: flex;
-    align-items: center;
+    display: block;
 }
 
-// Input itself renders transparent text so the user only sees the
-// overlay's colored tokens.  The caret stays visible because it
-// ignores `color` (on modern browsers) — we still force
-// caret-color to a readable accent just in case.
+// Plain visible textarea — no overlay, no transparent-text trick.
+// Auto-grow is driven from JS (height set against scrollHeight) and
+// capped at max-height; beyond that the textarea scrolls natively.
+// Native wrapping handles caret/IME/selection out of the box, which
+// is why we dropped the colored-token overlay (it was the source of
+// every multi-line drift bug).
 .termblocks-input {
     width: 100%;
     background: transparent;
     border: none;
     outline: none;
-    color: transparent;
+    color: var(--tb-tok-text);
     caret-color: var(--tb-accent);
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
     line-height: 1.4;
     padding: 4px 0;
-    position: relative;
-    z-index: 1;
+    resize: none;
+    overflow-y: auto;
+    max-height: 160px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: block;
 
     &::selection {
         background: rgba(184, 242, 192, 0.25);
@@ -649,58 +350,11 @@
     }
 }
 
-// Highlight overlay shares font metrics with the input and sits underneath
-// it.  Tokens render in their own colors; the ghost suffix extends past
-// the typed text.
-.termblocks-input-highlight {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.4;
-    padding: 4px 0;
-    white-space: pre;
-    overflow: hidden;
-    z-index: 0;
-    color: rgba(255, 255, 255, 0.9);
-}
+// (removed: .termblocks-input-highlight overlay and .tok-* token
+// styles. The input is a plain textarea now; shell-syntax coloring
+// while typing is gone — the same coloring still applies after the
+// command runs and renders inside the cmd-block.)
 
-.tok-cmd {
-    color: var(--tb-tok-cmd);
-    font-weight: 600;
-}
-.tok-flag {
-    color: var(--tb-tok-flag);
-}
-.tok-string {
-    color: var(--tb-tok-string);
-}
-.tok-var {
-    color: var(--tb-tok-var);
-}
-.tok-comment {
-    color: var(--tb-tok-comment);
-    font-style: italic;
-}
-.tok-op {
-    color: var(--tb-tok-op);
-    font-weight: 600;
-}
-.tok-path {
-    color: var(--tb-tok-path);
-    text-decoration: underline;
-    text-decoration-color: rgba(230, 230, 230, 0.2);
-    text-underline-offset: 3px;
-}
-.tok-text {
-    color: var(--tb-tok-text);
-}
-.tok-ghost {
-    color: var(--tb-tok-ghost);
-}
 
 // Clickable chip cursor
 .termblocks-chip-clickable {
@@ -743,9 +397,7 @@
     color: rgba(255, 255, 255, 0.8);
     font-family: inherit;
     font-size: 11px;
-    &::placeholder {
-        color: rgba(255, 255, 255, 0.25);
-    }
+    &::placeholder { color: rgba(255, 255, 255, 0.25); }
 }
 
 .tb-chip-dropdown-list {
@@ -774,9 +426,7 @@
 .tb-chip-dropdown-row-active {
     background: rgba(184, 242, 192, 0.12);
     color: var(--tb-accent);
-    .tb-chip-dropdown-row-icon {
-        color: var(--tb-accent);
-    }
+    .tb-chip-dropdown-row-icon { color: var(--tb-accent); }
 }
 
 .tb-chip-dropdown-row-icon {

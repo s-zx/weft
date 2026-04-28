@@ -7,7 +7,7 @@ import { RpcApi } from "@/app/store/wshclientapi";
 import { Notification, net, safeStorage, shell } from "electron";
 import { getResolvedUpdateChannel } from "emain/updater";
 import { unamePlatform } from "./emain-platform";
-import { getWebContentsByBlockId, webGetSelector } from "./emain-web";
+import { getWebContentsByBlockId, webClickElement, webGetSelector, webScreenshot } from "./emain-web";
 import { createBrowserWindow, getWaveWindowById, getWaveWindowByWorkspaceId } from "./emain-window";
 
 export class ElectronWshClientType extends WshClient {
@@ -29,6 +29,36 @@ export class ElectronWshClientType extends WshClient {
         }
         const rtn = await webGetSelector(wc, data.selector, data.opts);
         return rtn;
+    }
+
+    async handle_webclick(rh: RpcResponseHelper, data: CommandWebClickData): Promise<boolean> {
+        if (!data.tabid || !data.blockid || !data.workspaceid || !data.selector) {
+            throw new Error("tabid, blockid, workspaceid, and selector are required");
+        }
+        const ww = getWaveWindowByWorkspaceId(data.workspaceid);
+        if (ww == null) {
+            throw new Error(`no window found with workspace ${data.workspaceid}`);
+        }
+        const wc = await getWebContentsByBlockId(ww, data.tabid, data.blockid);
+        if (wc == null) {
+            throw new Error(`no webcontents found with blockid ${data.blockid}`);
+        }
+        return await webClickElement(wc, data.selector);
+    }
+
+    async handle_webscreenshot(rh: RpcResponseHelper, data: CommandWebScreenshotData): Promise<string> {
+        if (!data.tabid || !data.blockid || !data.workspaceid) {
+            throw new Error("tabid, blockid, and workspaceid are required");
+        }
+        const ww = getWaveWindowByWorkspaceId(data.workspaceid);
+        if (ww == null) {
+            throw new Error(`no window found with workspace ${data.workspaceid}`);
+        }
+        const wc = await getWebContentsByBlockId(ww, data.tabid, data.blockid);
+        if (wc == null) {
+            throw new Error(`no webcontents found with blockid ${data.blockid}`);
+        }
+        return await webScreenshot(wc);
     }
 
     async handle_notify(rh: RpcResponseHelper, notificationOptions: WaveNotificationOptions) {

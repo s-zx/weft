@@ -1,0 +1,45 @@
+{
+  "name": "ask-multi-turn",
+  "description": "Two-turn conversation: first asks about one file, second asks about another",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "package.json": "{\n  \"name\": \"myapp\",\n  \"version\": \"3.2.1\",\n  \"dependencies\": {\n    \"express\": \"^4.18.0\"\n  }\n}",
+      "tsconfig.json": "{\n  \"compilerOptions\": {\n    \"target\": \"ES2022\",\n    \"strict\": true\n  }\n}"
+    }
+  },
+  "turns": [
+    {
+      "user": "What version is the app in package.json?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/package.json"}}
+          ]
+        },
+        {
+          "text": "The app version in package.json is 3.2.1."
+        }
+      ]
+    },
+    {
+      "user": "What TypeScript target is configured in tsconfig.json?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/tsconfig.json"}}
+          ]
+        },
+        {
+          "text": "The TypeScript target in tsconfig.json is ES2022."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file", "read_text_file"],
+    "final_text_contains": ["ES2022"]
+  }
+}

@@ -10,8 +10,8 @@ import (
 	"io"
 	"log"
 
-	"github.com/wavetermdev/waveterm/pkg/baseds"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/baseds"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 type PacketParser struct {

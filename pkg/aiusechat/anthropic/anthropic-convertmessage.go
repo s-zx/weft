@@ -17,11 +17,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/util/logutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/logutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 // these conversions are based off the anthropic spec
@@ -110,7 +109,6 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 		Messages:  convertedMsgs,
 	}
 
-	// Add system prompt if provided
 	if len(chatOpts.SystemPrompt) > 0 {
 		systemBlocks := make([]anthropicMessageContentBlock, len(chatOpts.SystemPrompt))
 		for i, prompt := range chatOpts.SystemPrompt {
@@ -119,6 +117,7 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 				Text: prompt,
 			}
 		}
+		systemBlocks[len(systemBlocks)-1].CacheControl = &anthropicCacheControl{Type: "ephemeral"}
 		reqBody.System = systemBlocks
 	}
 
@@ -132,6 +131,18 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 	}
 	if chatOpts.AllowNativeWebSearch {
 		reqBody.Tools = append(reqBody.Tools, &anthropicWebSearchTool{Type: "web_search_20250305", Name: "web_search"})
+	}
+	if len(reqBody.Tools) > 0 {
+		last := reqBody.Tools[len(reqBody.Tools)-1]
+		switch t := last.(type) {
+		case *uctypes.ToolDefinition:
+			reqBody.Tools[len(reqBody.Tools)-1] = &anthropicCachedToolDef{
+				Name:         t.Name,
+				Description:  t.Description,
+				InputSchema:  t.InputSchema,
+				CacheControl: &anthropicCacheControl{Type: "ephemeral"},
+			}
+		}
 	}
 
 	// Enable extended thinking based on level
@@ -171,18 +182,6 @@ func buildAnthropicHTTPRequest(ctx context.Context, msgs []anthropicInputMessage
 	}
 	req.Header.Set("anthropic-version", AnthropicDefaultAPIVersion)
 	req.Header.Set("accept", "text/event-stream")
-	// Only send Wave-specific headers when using Wave provider
-	if opts.Provider == uctypes.AIProvider_Wave {
-		if chatOpts.ClientId != "" {
-			req.Header.Set("X-Wave-ClientId", chatOpts.ClientId)
-		}
-		if chatOpts.ChatId != "" {
-			req.Header.Set("X-Wave-ChatId", chatOpts.ChatId)
-		}
-		req.Header.Set("X-Wave-Version", wavebase.WaveVersion)
-		req.Header.Set("X-Wave-APIType", uctypes.APIType_AnthropicMessages)
-		req.Header.Set("X-Wave-RequestType", chatOpts.GetWaveRequestType())
-	}
 
 	return req, nil
 }
@@ -870,35 +869,44 @@ func GetFunctionCallInputByToolCallId(aiChat uctypes.AIChat, toolCallId string) 
 }
 
 func UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {
-	chat := chatstore.DefaultChatStore.Get(chatId)
-	if chat == nil {
-		return fmt.Errorf("chat not found: %s", chatId)
-	}
-	for _, genMsg := range chat.NativeMessages {
-		chatMsg, ok := genMsg.(*anthropicChatMessage)
+	messageId, found := chatstore.DefaultChatStore.FindMessageIdByPredicate(chatId, func(m uctypes.GenAIMessage) bool {
+		chatMsg, ok := m.(*anthropicChatMessage)
 		if !ok {
-			continue
+			return false
 		}
-		for i, block := range chatMsg.Content {
-			if block.Type != "tool_use" || block.ID != toolCallId {
-				continue
+		for _, block := range chatMsg.Content {
+			if block.Type == "tool_use" && block.ID == toolCallId {
+				return true
 			}
-			updatedMsg := &anthropicChatMessage{
-				MessageId: chatMsg.MessageId,
-				Usage:     chatMsg.Usage,
-				Role:      chatMsg.Role,
-				Content:   slices.Clone(chatMsg.Content),
-			}
-			updatedMsg.Content[i].ToolUseData = &toolUseData
-			aiOpts := &uctypes.AIOptsType{
-				APIType:    chat.APIType,
-				Model:      chat.Model,
-				APIVersion: chat.APIVersion,
-			}
-			return chatstore.DefaultChatStore.PostMessage(chatId, aiOpts, updatedMsg)
 		}
+		return false
+	})
+	if !found {
+		return fmt.Errorf("tool call with ID %s not found in chat %s", toolCallId, chatId)
 	}
-	return fmt.Errorf("tool call with ID %s not found in chat %s", toolCallId, chatId)
+	updated := chatstore.DefaultChatStore.UpdateMessage(chatId, messageId, func(m uctypes.GenAIMessage) uctypes.GenAIMessage {
+		chatMsg, ok := m.(*anthropicChatMessage)
+		if !ok {
+			return nil
+		}
+		newContent := slices.Clone(chatMsg.Content)
+		for i, block := range newContent {
+			if block.Type == "tool_use" && block.ID == toolCallId {
+				newContent[i].ToolUseData = &toolUseData
+				return &anthropicChatMessage{
+					MessageId: chatMsg.MessageId,
+					Usage:     chatMsg.Usage,
+					Role:      chatMsg.Role,
+					Content:   newContent,
+				}
+			}
+		}
+		return nil
+	})
+	if !updated {
+		return fmt.Errorf("tool call with ID %s vanished during update in chat %s", toolCallId, chatId)
+	}
+	return nil
 }
 
 func RemoveToolUseCall(chatId string, toolCallId string) error {

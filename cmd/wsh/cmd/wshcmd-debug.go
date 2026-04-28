@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 
 	"github.com/spf13/cobra"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 var debugCmd = &cobra.Command{

@@ -7,6 +7,7 @@ import type { TabModel } from "@/app/store/tab-model";
 import { makeORef } from "@/app/store/wos";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { SecretsContent } from "@/app/view/waveconfig/secretscontent";
+import { WaveAIVisualContent } from "@/app/view/waveconfig/waveaivisual";
 import { WaveConfigView } from "@/app/view/waveconfig/waveconfig";
 import type { WaveConfigEnv } from "@/app/view/waveconfig/waveconfigenv";
 import { base64ToString, stringToBase64 } from "@/util/util";
@@ -80,14 +81,13 @@ function makeConfigFiles(isWindows: boolean): ConfigFile[] {
             hasJsonView: true,
         },
         {
-            name: "Wave AI Modes",
+            name: "AI Provider",
             path: "waveai.json",
             language: "json",
-            description: "Local models and BYOK",
             docsUrl: "https://docs.waveterm.dev/waveai-modes",
             validator: validateWaveAiJson,
-            hasJsonView: true,
-            // visualComponent: WaveAIVisualContent,
+            hasJsonView: false,
+            visualComponent: WaveAIVisualContent,
         },
         {
             name: "Tab Backgrounds",

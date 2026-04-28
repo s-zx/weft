@@ -1,0 +1,31 @@
+{
+  "name": "do-write-nested-path",
+  "description": "Agent writes a file to a nested directory path",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a JSON config file at src/config.json with a key \"database\" set to \"postgres\" and \"port\" set to 5432.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/src/config.json", "contents": "{\n  \"database\": \"postgres\",\n  \"port\": 5432\n}"}}
+          ]
+        },
+        {
+          "text": "Created src/config.json with the database configuration."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file"],
+    "files_created": ["src/config.json"],
+    "files_contain": {
+      "src/config.json": "\"database\": \"postgres\""
+    }
+  }
+}

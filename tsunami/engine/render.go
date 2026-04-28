@@ -10,9 +10,9 @@ import (
 	"unicode"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/tsunami/rpctypes"
-	"github.com/wavetermdev/waveterm/tsunami/util"
-	"github.com/wavetermdev/waveterm/tsunami/vdom"
+	"github.com/s-zx/crest/tsunami/rpctypes"
+	"github.com/s-zx/crest/tsunami/util"
+	"github.com/s-zx/crest/tsunami/vdom"
 )
 
 // see render.md for a complete guide to how tsunami rendering, lifecycle, and reconciliation works

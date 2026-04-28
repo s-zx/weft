@@ -6,16 +6,16 @@
 package wshclient
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/baseds"
-	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
-	"github.com/wavetermdev/waveterm/pkg/telemetry/telemetrydata"
-	"github.com/wavetermdev/waveterm/pkg/vdom"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wps"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/baseds"
+	"github.com/s-zx/crest/pkg/cmdblock/cbtypes"
+	"github.com/s-zx/crest/pkg/telemetry/telemetrydata"
+	"github.com/s-zx/crest/pkg/vdom"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wps"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshutil"
 )
 
 // command "activity", wshserver.ActivityCommand
@@ -521,12 +521,6 @@ func GetWaveAIModeConfigCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (wconfi
 	return resp, err
 }
 
-// command "getwaveairatelimit", wshserver.GetWaveAIRateLimitCommand
-func GetWaveAIRateLimitCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (*uctypes.RateLimitInfo, error) {
-	resp, err := sendRpcRequestCallHelper[*uctypes.RateLimitInfo](w, "getwaveairatelimit", nil, opts)
-	return resp, err
-}
-
 // command "jobcmdexited", wshserver.JobCmdExitedCommand
 func JobCmdExitedCommand(w *wshutil.WshRpc, data wshrpc.CommandJobCmdExitedData, opts *wshrpc.RpcOpts) error {
 	_, err := sendRpcRequestCallHelper[any](w, "jobcmdexited", data, opts)
@@ -632,6 +626,12 @@ func ListAllAppsCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) ([]wshrpc.AppIn
 // command "listalleditableapps", wshserver.ListAllEditableAppsCommand
 func ListAllEditableAppsCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) ([]wshrpc.AppInfo, error) {
 	resp, err := sendRpcRequestCallHelper[[]wshrpc.AppInfo](w, "listalleditableapps", nil, opts)
+	return resp, err
+}
+
+// command "listprovidermodels", wshserver.ListProviderModelsCommand
+func ListProviderModelsCommand(w *wshutil.WshRpc, data wshrpc.CommandListProviderModelsData, opts *wshrpc.RpcOpts) (*wshrpc.CommandListProviderModelsRtnData, error) {
+	resp, err := sendRpcRequestCallHelper[*wshrpc.CommandListProviderModelsRtnData](w, "listprovidermodels", data, opts)
 	return resp, err
 }
 
@@ -909,6 +909,12 @@ func SetVarCommand(w *wshutil.WshRpc, data wshrpc.CommandVarData, opts *wshrpc.R
 	return err
 }
 
+// command "showblock", wshserver.ShowBlockCommand
+func ShowBlockCommand(w *wshutil.WshRpc, data wshrpc.CommandShowBlockData, opts *wshrpc.RpcOpts) error {
+	_, err := sendRpcRequestCallHelper[any](w, "showblock", data, opts)
+	return err
+}
+
 // command "startbuilder", wshserver.StartBuilderCommand
 func StartBuilderCommand(w *wshutil.WshRpc, data wshrpc.CommandStartBuilderData, opts *wshrpc.RpcOpts) error {
 	_, err := sendRpcRequestCallHelper[any](w, "startbuilder", data, opts)
@@ -1040,6 +1046,18 @@ func WaveFileReadStreamCommand(w *wshutil.WshRpc, data wshrpc.CommandWaveFileRea
 // command "waveinfo", wshserver.WaveInfoCommand
 func WaveInfoCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (*wshrpc.WaveInfoData, error) {
 	resp, err := sendRpcRequestCallHelper[*wshrpc.WaveInfoData](w, "waveinfo", nil, opts)
+	return resp, err
+}
+
+// command "webclick", wshserver.WebClickCommand
+func WebClickCommand(w *wshutil.WshRpc, data wshrpc.CommandWebClickData, opts *wshrpc.RpcOpts) (bool, error) {
+	resp, err := sendRpcRequestCallHelper[bool](w, "webclick", data, opts)
+	return resp, err
+}
+
+// command "webscreenshot", wshserver.WebScreenshotCommand
+func WebScreenshotCommand(w *wshutil.WshRpc, data wshrpc.CommandWebScreenshotData, opts *wshrpc.RpcOpts) (string, error) {
+	resp, err := sendRpcRequestCallHelper[string](w, "webscreenshot", data, opts)
 	return resp, err
 }
 

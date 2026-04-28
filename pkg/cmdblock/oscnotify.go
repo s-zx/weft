@@ -7,8 +7,8 @@ import (
 	"bytes"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
-	"github.com/wavetermdev/waveterm/pkg/wps"
+	"github.com/s-zx/crest/pkg/cmdblock/cbtypes"
+	"github.com/s-zx/crest/pkg/wps"
 )
 
 // Notification escape sequences emitted by AI coding agents (Claude Code,

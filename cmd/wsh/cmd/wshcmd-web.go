@@ -8,10 +8,10 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/wshutil"
 )
 
 var webCmd = &cobra.Command{

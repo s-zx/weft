@@ -1,0 +1,64 @@
+name: Harbor Nightly (terminal-bench)
+
+on:
+  schedule:
+    - cron: "37 3 * * *"  # 3:37 AM UTC daily
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: "Number of tasks to run (0 = all)"
+        default: "0"
+        type: string
+      model:
+        description: "Model to use"
+        default: "anthropic/claude-sonnet-4-20250514"
+        type: string
+
+env:
+  HARBOR_MODEL: ${{ github.event.inputs.model || 'anthropic/claude-sonnet-4-20250514' }}
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Harbor
+        run: pip install harbor-ai
+
+      - name: Build wavesrv
+        run: |
+          CGO_ENABLED=1 go build -tags "osusergo,sqlite_omit_load_extension" \
+            -o /usr/local/bin/wavesrv cmd/server/main-server.go
+
+      - name: Run terminal-bench
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          TASK_COUNT=${{ github.event.inputs.tasks || '0' }}
+          ARGS="-d terminal-bench/terminal-bench-2 --agent-import-path eval.harbor.crest_agent:CrestAgent -m $HARBOR_MODEL"
+          if [ "$TASK_COUNT" != "0" ]; then
+            ARGS="$ARGS -n $TASK_COUNT"
+          fi
+          harbor run $ARGS 2>&1 | tee harbor-output.txt
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harbor-results-${{ github.run_number }}
+          path: |
+            harbor-output.txt
+            /logs/agent/
+          retention-days: 30

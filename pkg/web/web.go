@@ -20,17 +20,18 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/gorilla/mux"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat"
-	"github.com/wavetermdev/waveterm/pkg/authkey"
-	"github.com/wavetermdev/waveterm/pkg/filestore"
-	"github.com/wavetermdev/waveterm/pkg/panichandler"
-	"github.com/wavetermdev/waveterm/pkg/remote/fileshare/wshfs"
-	"github.com/wavetermdev/waveterm/pkg/schema"
-	"github.com/wavetermdev/waveterm/pkg/service"
-	"github.com/wavetermdev/waveterm/pkg/util/fileutil"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/agent"
+	"github.com/s-zx/crest/pkg/aiusechat"
+	"github.com/s-zx/crest/pkg/authkey"
+	"github.com/s-zx/crest/pkg/filestore"
+	"github.com/s-zx/crest/pkg/panichandler"
+	"github.com/s-zx/crest/pkg/remote/fileshare/wshfs"
+	"github.com/s-zx/crest/pkg/schema"
+	"github.com/s-zx/crest/pkg/service"
+	"github.com/s-zx/crest/pkg/util/fileutil"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 type WebFnType = func(http.ResponseWriter, *http.Request)
@@ -452,6 +453,9 @@ func RunWebServer(listener net.Listener) {
 	gr.HandleFunc("/wave/stream-file", WebFnWrap(WebFnOpts{AllowCaching: true}, handleStreamFile))
 	gr.PathPrefix("/wave/stream-file/").HandlerFunc(WebFnWrap(WebFnOpts{AllowCaching: true}, handleStreamFile))
 	gr.HandleFunc("/api/post-chat-message", WebFnWrap(WebFnOpts{AllowCaching: false}, aiusechat.WaveAIPostMessageHandler))
+	gr.HandleFunc("/api/post-agent-message", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.PostAgentMessageHandler))
+	gr.HandleFunc("/api/agent-rewind", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.AgentRewindHandler))
+	gr.HandleFunc("/api/agent-worktree", WebFnWrap(WebFnOpts{AllowCaching: false}, agent.AgentWorktreeHandler))
 
 	// Non-streaming /wave/ routes get timeout protection
 	waveRouter := mux.NewRouter()

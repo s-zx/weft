@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/creack/pty"
-	"github.com/wavetermdev/waveterm/pkg/util/unixutil"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/util/unixutil"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wshrpc"
 )
 
 type CmdDef struct {

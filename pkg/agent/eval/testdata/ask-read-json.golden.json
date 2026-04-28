@@ -1,0 +1,30 @@
+{
+  "name": "ask-read-json",
+  "description": "Agent reads a JSON config file and responds with parsed information",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "settings.json": "{\n  \"app_name\": \"DataPipeline\",\n  \"version\": \"1.4.0\",\n  \"max_workers\": 8,\n  \"retry_attempts\": 3,\n  \"log_level\": \"warn\",\n  \"features\": {\n    \"caching\": true,\n    \"compression\": false\n  }\n}"
+    }
+  },
+  "turns": [
+    {
+      "user": "Read settings.json and tell me the app name, how many workers it uses, and which features are enabled.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/settings.json"}}
+          ]
+        },
+        {
+          "text": "From settings.json:\n- App name: DataPipeline\n- Max workers: 8\n- Features: caching is enabled, compression is disabled"
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file"],
+    "final_text_contains": ["DataPipeline", "8", "caching"]
+  }
+}

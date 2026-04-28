@@ -4,7 +4,7 @@
 package gemini
 
 import (
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 )
 
 const (
@@ -25,6 +25,46 @@ func (m *GeminiChatMessage) GetMessageId() string {
 
 func (m *GeminiChatMessage) GetRole() string {
 	return m.Role
+}
+
+func (m *GeminiChatMessage) DependsOnPrev() bool {
+	if m == nil {
+		return false
+	}
+	for _, p := range m.Parts {
+		if p.FunctionResponse != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// CollapseToolResults rewrites every functionResponse part's response map
+// to a single {"output": placeholder} field and drops nested multimodal
+// parts. Function name is preserved so the pairing with the prior model
+// turn's functionCall stays valid.
+func (m *GeminiChatMessage) CollapseToolResults(placeholder string) int {
+	if m == nil {
+		return 0
+	}
+	count := 0
+	for i := range m.Parts {
+		fr := m.Parts[i].FunctionResponse
+		if fr == nil {
+			continue
+		}
+		// Cheap size estimate: existing response stringified vs placeholder.
+		// Skip if already small (nothing to gain).
+		if len(fr.Parts) == 0 && len(fr.Response) == 1 {
+			if existing, ok := fr.Response["output"].(string); ok && len(existing) <= len(placeholder) {
+				continue
+			}
+		}
+		fr.Response = map[string]any{"output": placeholder}
+		fr.Parts = nil
+		count++
+	}
+	return count
 }
 
 func (m *GeminiChatMessage) GetUsage() *uctypes.AIUsage {
@@ -80,14 +120,14 @@ func (p *GeminiMessagePart) Clean() *GeminiMessagePart {
 // GeminiInlineData represents inline binary data
 type GeminiInlineData struct {
 	MimeType    string `json:"mimeType"`
-	Data        string `json:"data"` // base64 encoded
+	Data        string `json:"data"`                  // base64 encoded
 	DisplayName string `json:"displayName,omitempty"` // for multimodal function responses
 }
 
 // GeminiFileData represents uploaded file reference
 type GeminiFileData struct {
 	MimeType    string `json:"mimeType"`
-	FileUri     string `json:"fileUri"` // gs:// URI from file upload
+	FileUri     string `json:"fileUri"`               // gs:// URI from file upload
 	DisplayName string `json:"displayName,omitempty"` // for multimodal function responses
 }
 

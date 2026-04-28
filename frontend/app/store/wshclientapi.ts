@@ -522,12 +522,6 @@ export class RpcApiType {
         return client.wshRpcCall("getwaveaimodeconfig", null, opts);
     }
 
-    // command "getwaveairatelimit" [call]
-    GetWaveAIRateLimitCommand(client: WshClient, opts?: RpcOpts): Promise<RateLimitInfo> {
-        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "getwaveairatelimit", null, opts);
-        return client.wshRpcCall("getwaveairatelimit", null, opts);
-    }
-
     // command "jobcmdexited" [call]
     JobCmdExitedCommand(client: WshClient, data: CommandJobCmdExitedData, opts?: RpcOpts): Promise<void> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "jobcmdexited", data, opts);
@@ -634,6 +628,12 @@ export class RpcApiType {
     ListAllEditableAppsCommand(client: WshClient, opts?: RpcOpts): Promise<AppInfo[]> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "listalleditableapps", null, opts);
         return client.wshRpcCall("listalleditableapps", null, opts);
+    }
+
+    // command "listprovidermodels" [call]
+    ListProviderModelsCommand(client: WshClient, data: CommandListProviderModelsData, opts?: RpcOpts): Promise<CommandListProviderModelsRtnData> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "listprovidermodels", data, opts);
+        return client.wshRpcCall("listprovidermodels", data, opts);
     }
 
     // command "macosversion" [call]
@@ -912,6 +912,12 @@ export class RpcApiType {
         return client.wshRpcCall("setvar", data, opts);
     }
 
+    // command "showblock" [call]
+    ShowBlockCommand(client: WshClient, data: CommandShowBlockData, opts?: RpcOpts): Promise<void> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "showblock", data, opts);
+        return client.wshRpcCall("showblock", data, opts);
+    }
+
     // command "startbuilder" [call]
     StartBuilderCommand(client: WshClient, data: CommandStartBuilderData, opts?: RpcOpts): Promise<void> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "startbuilder", data, opts);
@@ -1048,6 +1054,18 @@ export class RpcApiType {
     WaveInfoCommand(client: WshClient, opts?: RpcOpts): Promise<WaveInfoData> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "waveinfo", null, opts);
         return client.wshRpcCall("waveinfo", null, opts);
+    }
+
+    // command "webclick" [call]
+    WebClickCommand(client: WshClient, data: CommandWebClickData, opts?: RpcOpts): Promise<boolean> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "webclick", data, opts);
+        return client.wshRpcCall("webclick", data, opts);
+    }
+
+    // command "webscreenshot" [call]
+    WebScreenshotCommand(client: WshClient, data: CommandWebScreenshotData, opts?: RpcOpts): Promise<string> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "webscreenshot", data, opts);
+        return client.wshRpcCall("webscreenshot", data, opts);
     }
 
     // command "webselector" [call]

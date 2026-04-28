@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
+	"github.com/s-zx/crest/pkg/wstore"
 )
 
 var ErrNotFound = errors.New("cmdblock not found")

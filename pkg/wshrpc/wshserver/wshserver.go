@@ -23,45 +23,44 @@ import (
 	"time"
 
 	"github.com/skratchdot/open-golang/open"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/baseds"
-	"github.com/wavetermdev/waveterm/pkg/blockcontroller"
-	"github.com/wavetermdev/waveterm/pkg/blocklogger"
-	"github.com/wavetermdev/waveterm/pkg/cmdblock"
-	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
-	"github.com/wavetermdev/waveterm/pkg/buildercontroller"
-	"github.com/wavetermdev/waveterm/pkg/filebackup"
-	"github.com/wavetermdev/waveterm/pkg/filestore"
-	"github.com/wavetermdev/waveterm/pkg/genconn"
-	"github.com/wavetermdev/waveterm/pkg/jobcontroller"
-	"github.com/wavetermdev/waveterm/pkg/panichandler"
-	"github.com/wavetermdev/waveterm/pkg/remote"
-	"github.com/wavetermdev/waveterm/pkg/remote/conncontroller"
-	"github.com/wavetermdev/waveterm/pkg/remote/fileshare/wshfs"
-	"github.com/wavetermdev/waveterm/pkg/secretstore"
-	"github.com/wavetermdev/waveterm/pkg/suggestion"
-	"github.com/wavetermdev/waveterm/pkg/telemetry"
-	"github.com/wavetermdev/waveterm/pkg/telemetry/telemetrydata"
-	"github.com/wavetermdev/waveterm/pkg/util/envutil"
-	"github.com/wavetermdev/waveterm/pkg/util/shellutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/waveappstore"
-	"github.com/wavetermdev/waveterm/pkg/waveapputil"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/wavejwt"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wcloud"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wcore"
-	"github.com/wavetermdev/waveterm/pkg/wps"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
-	"github.com/wavetermdev/waveterm/pkg/wsl"
-	"github.com/wavetermdev/waveterm/pkg/wslconn"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
-	"github.com/wavetermdev/waveterm/tsunami/build"
+	"github.com/s-zx/crest/pkg/aiusechat"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/baseds"
+	"github.com/s-zx/crest/pkg/blockcontroller"
+	"github.com/s-zx/crest/pkg/blocklogger"
+	"github.com/s-zx/crest/pkg/cmdblock"
+	"github.com/s-zx/crest/pkg/cmdblock/cbtypes"
+	"github.com/s-zx/crest/pkg/buildercontroller"
+	"github.com/s-zx/crest/pkg/filebackup"
+	"github.com/s-zx/crest/pkg/filestore"
+	"github.com/s-zx/crest/pkg/genconn"
+	"github.com/s-zx/crest/pkg/jobcontroller"
+	"github.com/s-zx/crest/pkg/panichandler"
+	"github.com/s-zx/crest/pkg/remote"
+	"github.com/s-zx/crest/pkg/remote/conncontroller"
+	"github.com/s-zx/crest/pkg/remote/fileshare/wshfs"
+	"github.com/s-zx/crest/pkg/secretstore"
+	"github.com/s-zx/crest/pkg/suggestion"
+	"github.com/s-zx/crest/pkg/telemetry"
+	"github.com/s-zx/crest/pkg/telemetry/telemetrydata"
+	"github.com/s-zx/crest/pkg/util/envutil"
+	"github.com/s-zx/crest/pkg/util/shellutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/waveappstore"
+	"github.com/s-zx/crest/pkg/waveapputil"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wavejwt"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wcore"
+	"github.com/s-zx/crest/pkg/wps"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshutil"
+	"github.com/s-zx/crest/pkg/wsl"
+	"github.com/s-zx/crest/pkg/wslconn"
+	"github.com/s-zx/crest/pkg/wstore"
+	"github.com/s-zx/crest/tsunami/build"
 )
 
 var InvalidWslDistroNames = []string{"docker-desktop", "docker-desktop-data"}
@@ -570,8 +569,7 @@ func (ws *WshServer) GetFullConfigCommand(ctx context.Context) (wconfig.FullConf
 
 func (ws *WshServer) GetWaveAIModeConfigCommand(ctx context.Context) (wconfig.AIModeConfigUpdate, error) {
 	fullConfig := wconfig.GetWatcher().GetFullConfig()
-	resolvedConfigs := aiusechat.ComputeResolvedAIModeConfigs(fullConfig)
-	return wconfig.AIModeConfigUpdate{Configs: resolvedConfigs}, nil
+	return wconfig.AIModeConfigUpdate{Configs: fullConfig.WaveAIModes}, nil
 }
 
 func (ws *WshServer) ConnStatusCommand(ctx context.Context) ([]wshrpc.ConnStatus, error) {
@@ -1254,7 +1252,7 @@ func (ws *WshServer) RecordTEventCommand(ctx context.Context, data telemetrydata
 }
 
 func (ws WshServer) SendTelemetryCommand(ctx context.Context) error {
-	return wcloud.SendAllTelemetry(wstore.GetClientId())
+	return nil
 }
 
 func (ws *WshServer) WaveAIEnableTelemetryCommand(ctx context.Context) error {
@@ -1274,12 +1272,6 @@ func (ws *WshServer) WaveAIEnableTelemetryCommand(ctx context.Context) error {
 		log.Printf("error recording waveai:enabletelemetry event: %v", err)
 	}
 
-	// Immediately send telemetry to cloud
-	err = wcloud.SendAllTelemetry(wstore.GetClientId())
-	if err != nil {
-		log.Printf("error sending telemetry after enabling: %v", err)
-	}
-
 	return nil
 }
 
@@ -1295,11 +1287,25 @@ func (ws *WshServer) GetWaveAIChatCommand(ctx context.Context, data wshrpc.Comma
 	return uiChat, nil
 }
 
-func (ws *WshServer) GetWaveAIRateLimitCommand(ctx context.Context) (*uctypes.RateLimitInfo, error) {
-	return aiusechat.GetGlobalRateLimit(), nil
-}
-
 func (ws *WshServer) WaveAIToolApproveCommand(ctx context.Context, data wshrpc.CommandWaveAIToolApproveData) error {
+	// Persist "remember this" rule first so it lands in the engine
+	// before the next tool call (which may be the same shape and
+	// would otherwise re-prompt). Persistence is best-effort —
+	// failing to save a rule shouldn't block the approval the user
+	// already clicked. We log but continue.
+	if data.AcceptedToolName != "" && data.AcceptedDestination != "" {
+		err := aiusechat.PersistAcceptedSuggestion(aiusechat.AcceptedSuggestion{
+			ChatId:      data.ChatId,
+			ToolCallId:  data.ToolCallId,
+			ToolName:    data.AcceptedToolName,
+			Content:     data.AcceptedContent,
+			Destination: data.AcceptedDestination,
+			Cwd:         data.Cwd,
+		})
+		if err != nil {
+			log.Printf("WaveAIToolApprove: persist suggestion failed: %v\n", err)
+		}
+	}
 	return aiusechat.UpdateToolApproval(data.ToolCallId, data.Approval)
 }
 
@@ -1313,6 +1319,99 @@ func (ws *WshServer) WaveAIGetToolDiffCommand(ctx context.Context, data wshrpc.C
 		OriginalContents64: base64.StdEncoding.EncodeToString(originalContent),
 		ModifiedContents64: base64.StdEncoding.EncodeToString(modifiedContent),
 	}, nil
+}
+
+func (ws *WshServer) ListProviderModelsCommand(ctx context.Context, data wshrpc.CommandListProviderModelsData) (*wshrpc.CommandListProviderModelsRtnData, error) {
+	models, err := aiusechat.ListProviderModels(ctx, data.APIType, data.BaseURL, data.APIToken)
+	if err != nil {
+		return nil, err
+	}
+	return &wshrpc.CommandListProviderModelsRtnData{Models: models}, nil
+}
+
+func (ws *WshServer) ShowBlockCommand(ctx context.Context, data wshrpc.CommandShowBlockData) error {
+	if data.BlockId == "" {
+		return fmt.Errorf("blockid is required")
+	}
+	if data.TabId == "" {
+		return fmt.Errorf("tabid is required")
+	}
+	ctx = waveobj.ContextWithUpdates(ctx)
+
+	// Validate the block still exists. If the user previously
+	// opened it and then closed it, DeleteBlockCommand will have
+	// removed the row entirely — laying out a missing blockId
+	// produces an empty placeholder leaf, which is the bug we hit
+	// before this guard. Fail fast so the FE can show a "dismissed"
+	// state instead.
+	block, err := wstore.DBGet[*waveobj.Block](ctx, data.BlockId)
+	if err != nil {
+		return fmt.Errorf("error checking block: %w", err)
+	}
+	if block == nil {
+		return fmt.Errorf("block %s no longer exists", data.BlockId)
+	}
+
+	// Once a background block is shown to the user, drop the
+	// auto-self-delete-on-exit flag — opened blocks should keep
+	// their post-mortem output around for the user to read. The
+	// flag was set by shell_exec to GC truly fire-and-forget runs
+	// the user never looked at.
+	_ = wstore.UpdateObjectMeta(ctx, waveobj.MakeORef(waveobj.OType_Block, data.BlockId), waveobj.MetaMapType{
+		waveobj.MetaKey_CmdCloseOnExit: false,
+	}, false)
+
+	var layoutAction *waveobj.LayoutActionData
+	if data.TargetBlockId != "" {
+		switch data.TargetAction {
+		case "splitright":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitHorizontal,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "after",
+				Focused:       data.Focused,
+			}
+		case "splitleft":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitHorizontal,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "before",
+				Focused:       data.Focused,
+			}
+		case "splitup":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitVertical,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "before",
+				Focused:       data.Focused,
+			}
+		case "", "splitdown":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitVertical,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "after",
+				Focused:       data.Focused,
+			}
+		default:
+			return fmt.Errorf("unsupported target_action %q", data.TargetAction)
+		}
+	} else {
+		layoutAction = &waveobj.LayoutActionData{
+			ActionType: wcore.LayoutActionDataType_Insert,
+			BlockId:    data.BlockId,
+			Focused:    data.Focused,
+		}
+	}
+
+	if err := wcore.QueueLayoutActionForTab(ctx, data.TabId, *layoutAction); err != nil {
+		return fmt.Errorf("queue layout action: %w", err)
+	}
+	wps.Broker.SendUpdateEvents(waveobj.ContextGetUpdatesRtn(ctx))
+	return nil
 }
 
 var wshActivityRe = regexp.MustCompile(`^[a-z:#]+$`)

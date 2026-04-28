@@ -14,38 +14,37 @@ import (
 	"time"
 
 	"github.com/joho/godotenv"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat"
-	"github.com/wavetermdev/waveterm/pkg/authkey"
-	"github.com/wavetermdev/waveterm/pkg/blockcontroller"
-	"github.com/wavetermdev/waveterm/pkg/blocklogger"
-	"github.com/wavetermdev/waveterm/pkg/filebackup"
-	"github.com/wavetermdev/waveterm/pkg/filestore"
-	"github.com/wavetermdev/waveterm/pkg/jobcontroller"
-	"github.com/wavetermdev/waveterm/pkg/panichandler"
-	"github.com/wavetermdev/waveterm/pkg/remote/conncontroller"
-	"github.com/wavetermdev/waveterm/pkg/remote/fileshare/wshfs"
-	"github.com/wavetermdev/waveterm/pkg/secretstore"
-	"github.com/wavetermdev/waveterm/pkg/service"
-	"github.com/wavetermdev/waveterm/pkg/telemetry"
-	"github.com/wavetermdev/waveterm/pkg/telemetry/telemetrydata"
-	"github.com/wavetermdev/waveterm/pkg/util/envutil"
-	"github.com/wavetermdev/waveterm/pkg/util/shellutil"
-	"github.com/wavetermdev/waveterm/pkg/util/sigutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wcloud"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wcore"
-	"github.com/wavetermdev/waveterm/pkg/web"
-	"github.com/wavetermdev/waveterm/pkg/wps"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshremote"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshserver"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
-	"github.com/wavetermdev/waveterm/pkg/wslconn"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
+	agentmcp "github.com/s-zx/crest/pkg/agent/mcp"
+	"github.com/s-zx/crest/pkg/authkey"
+	"github.com/s-zx/crest/pkg/blockcontroller"
+	"github.com/s-zx/crest/pkg/blocklogger"
+	"github.com/s-zx/crest/pkg/filebackup"
+	"github.com/s-zx/crest/pkg/filestore"
+	"github.com/s-zx/crest/pkg/jobcontroller"
+	"github.com/s-zx/crest/pkg/panichandler"
+	"github.com/s-zx/crest/pkg/remote/conncontroller"
+	"github.com/s-zx/crest/pkg/remote/fileshare/wshfs"
+	"github.com/s-zx/crest/pkg/secretstore"
+	"github.com/s-zx/crest/pkg/service"
+	"github.com/s-zx/crest/pkg/telemetry"
+	"github.com/s-zx/crest/pkg/telemetry/telemetrydata"
+	"github.com/s-zx/crest/pkg/util/envutil"
+	"github.com/s-zx/crest/pkg/util/shellutil"
+	"github.com/s-zx/crest/pkg/util/sigutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wcore"
+	"github.com/s-zx/crest/pkg/web"
+	"github.com/s-zx/crest/pkg/wps"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/wshrpc/wshremote"
+	"github.com/s-zx/crest/pkg/wshrpc/wshserver"
+	"github.com/s-zx/crest/pkg/wshutil"
+	"github.com/s-zx/crest/pkg/wslconn"
+	"github.com/s-zx/crest/pkg/wstore"
 
 	"net/http"
 	_ "net/http/pprof"
@@ -81,6 +80,7 @@ func doShutdown(reason string) {
 		ctx, cancelFn := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelFn()
 		go blockcontroller.StopAllBlockControllersForShutdown()
+		agentmcp.GetManager().Shutdown()
 		shutdownActivityUpdate()
 		sendTelemetryWrapper()
 		// TODO deal with flush in progress
@@ -155,17 +155,11 @@ func diagnosticLoop() {
 }
 
 func sendDiagnosticPing() bool {
-	ctx, cancelFn := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancelFn()
-
 	rpcClient := wshclient.GetBareRpcClient()
 	isOnline, err := wshclient.NetworkOnlineCommand(rpcClient, &wshrpc.RpcOpts{Route: "electron", Timeout: 2000})
 	if err != nil || !isOnline {
 		return false
 	}
-	clientId := wstore.GetClientId()
-	usageTelemetry := telemetry.IsTelemetryEnabled()
-	wcloud.SendDiagnosticPing(ctx, clientId, usageTelemetry)
 	return true
 }
 
@@ -181,7 +175,6 @@ func setupTelemetryConfigHandler() {
 		newTelemetryEnabled := newConfig.Settings.TelemetryEnabled
 		if newTelemetryEnabled != currentTelemetryEnabled {
 			currentTelemetryEnabled = newTelemetryEnabled
-			wcore.GoSendNoTelemetryUpdate(newTelemetryEnabled)
 		}
 	})
 }
@@ -221,11 +214,6 @@ func sendTelemetryWrapper() {
 	ctx, cancelFn := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancelFn()
 	beforeSendActivityUpdate(ctx)
-	clientId := wstore.GetClientId()
-	err := wcloud.SendAllTelemetry(clientId)
-	if err != nil {
-		log.Printf("[error] sending telemetry: %v\n", err)
-	}
 }
 
 func updateTelemetryCounts(lastCounts telemetrydata.TEventProps) telemetrydata.TEventProps {
@@ -244,15 +232,13 @@ func updateTelemetryCounts(lastCounts telemetrydata.TEventProps) telemetrydata.T
 
 	fullConfig := wconfig.GetWatcher().GetFullConfig()
 	customWidgets := fullConfig.CountCustomWidgets()
-	customAIPresets := fullConfig.CountCustomAIPresets()
 	customSettings := wconfig.CountCustomSettings()
 	customAIModes := fullConfig.CountCustomAIModes()
 
 	props.UserSet = &telemetrydata.TEventUserProps{
-		SettingsCustomWidgets:   customWidgets,
-		SettingsCustomAIPresets: customAIPresets,
-		SettingsCustomSettings:  customSettings,
-		SettingsCustomAIModes:   customAIModes,
+		SettingsCustomWidgets:  customWidgets,
+		SettingsCustomSettings: customSettings,
+		SettingsCustomAIModes:  customAIModes,
 	}
 
 	secretsCount, err := secretstore.CountSecrets()
@@ -405,11 +391,6 @@ func grabAndRemoveEnvVars() error {
 	if err != nil {
 		return err
 	}
-	err = wcloud.CacheAndRemoveEnvVars()
-	if err != nil {
-		return err
-	}
-
 	// Remove WAVETERM env vars that leak from prod => dev
 	os.Unsetenv("WAVETERM_CLIENTID")
 	os.Unsetenv("WAVETERM_WORKSPACEID")
@@ -563,7 +544,6 @@ func main() {
 	sigutil.InstallSIGUSR1Handler()
 	wconfig.MigratePresetsBackgrounds()
 	startConfigWatcher()
-	aiusechat.InitAIModeConfigWatcher()
 	maybeStartPprofServer()
 	go stdinReadWatch()
 	go telemetryLoop()

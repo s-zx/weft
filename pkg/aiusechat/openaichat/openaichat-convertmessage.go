@@ -14,10 +14,10 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/wavebase"
 )
 
 const (
@@ -126,8 +126,13 @@ func buildChatHTTPRequest(ctx context.Context, messages []ChatRequestMessage, ch
 		}
 	}
 
+	endpoint := opts.Endpoint
+	if !strings.HasSuffix(endpoint, "/chat/completions") {
+		endpoint = strings.TrimRight(endpoint, "/") + "/chat/completions"
+	}
+
 	if wavebase.IsDevMode() {
-		log.Printf("openaichat: model %s, messages: %d, tools: %d\n", opts.Model, len(messages), len(allTools))
+		log.Printf("openaichat: model %s, messages: %d, tools: %d, endpoint: %s\n", opts.Model, len(messages), len(allTools), endpoint)
 	}
 
 	buf, err := json.Marshal(reqBody)
@@ -135,7 +140,7 @@ func buildChatHTTPRequest(ctx context.Context, messages []ChatRequestMessage, ch
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, opts.Endpoint, bytes.NewReader(buf))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
 		return nil, err
 	}
@@ -151,20 +156,16 @@ func buildChatHTTPRequest(ctx context.Context, messages []ChatRequestMessage, ch
 
 	req.Header.Set("Accept", "text/event-stream")
 
-	// Only send Wave-specific headers when using Wave provider
-	if opts.Provider == uctypes.AIProvider_Wave {
-		if chatOpts.ClientId != "" {
-			req.Header.Set("X-Wave-ClientId", chatOpts.ClientId)
-		}
-		if chatOpts.ChatId != "" {
-			req.Header.Set("X-Wave-ChatId", chatOpts.ChatId)
-		}
-		req.Header.Set("X-Wave-Version", wavebase.WaveVersion)
-		req.Header.Set("X-Wave-APIType", uctypes.APIType_OpenAIChat)
-		req.Header.Set("X-Wave-RequestType", chatOpts.GetWaveRequestType())
+	if isOpenRouterEndpoint(opts.Endpoint) {
+		req.Header.Set("HTTP-Referer", "https://github.com/s-zx/crest")
+		req.Header.Set("X-Title", "Crest Agent")
 	}
 
 	return req, nil
+}
+
+func isOpenRouterEndpoint(endpoint string) bool {
+	return strings.Contains(strings.ToLower(endpoint), "openrouter.ai")
 }
 
 // ConvertAIMessageToStoredChatMessage converts an AIMessage to StoredChatMessage
@@ -466,31 +467,33 @@ func GetFunctionCallInputByToolCallId(aiChat uctypes.AIChat, toolCallId string) 
 
 // UpdateToolUseData updates the ToolUseData for a specific tool call in the chat history
 func UpdateToolUseData(chatId string, callId string, newToolUseData uctypes.UIMessageDataToolUse) error {
-	chat := chatstore.DefaultChatStore.Get(chatId)
-	if chat == nil {
-		return fmt.Errorf("chat not found: %s", chatId)
-	}
-
-	for _, genMsg := range chat.NativeMessages {
-		chatMsg, ok := genMsg.(*StoredChatMessage)
+	messageId, found := chatstore.DefaultChatStore.FindMessageIdByPredicate(chatId, func(m uctypes.GenAIMessage) bool {
+		chatMsg, ok := m.(*StoredChatMessage)
 		if !ok {
-			continue
+			return false
+		}
+		return chatMsg.Message.FindToolCallIndex(callId) != -1
+	})
+	if !found {
+		return fmt.Errorf("tool call with callId %s not found in chat %s", callId, chatId)
+	}
+	updated := chatstore.DefaultChatStore.UpdateMessage(chatId, messageId, func(m uctypes.GenAIMessage) uctypes.GenAIMessage {
+		chatMsg, ok := m.(*StoredChatMessage)
+		if !ok {
+			return nil
 		}
 		idx := chatMsg.Message.FindToolCallIndex(callId)
 		if idx == -1 {
-			continue
+			return nil
 		}
 		updatedMsg := chatMsg.Copy()
 		updatedMsg.Message.ToolCalls[idx].ToolUseData = &newToolUseData
-		aiOpts := &uctypes.AIOptsType{
-			APIType:    chat.APIType,
-			Model:      chat.Model,
-			APIVersion: chat.APIVersion,
-		}
-		return chatstore.DefaultChatStore.PostMessage(chatId, aiOpts, updatedMsg)
+		return updatedMsg
+	})
+	if !updated {
+		return fmt.Errorf("tool call with callId %s vanished during update in chat %s", callId, chatId)
 	}
-
-	return fmt.Errorf("tool call with callId %s not found in chat %s", callId, chatId)
+	return nil
 }
 
 func RemoveToolUseCall(chatId string, callId string) error {

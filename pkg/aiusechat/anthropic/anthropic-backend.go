@@ -11,19 +11,19 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/launchdarkly/eventsource"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/util/logutil"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/web/sse"
+	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/httpretry"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/logutil"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/web/sse"
 )
 
 const (
@@ -50,6 +50,43 @@ func (m *anthropicChatMessage) GetMessageId() string {
 
 func (m *anthropicChatMessage) GetRole() string {
 	return m.Role
+}
+
+func (m *anthropicChatMessage) DependsOnPrev() bool {
+	if m == nil {
+		return false
+	}
+	for _, block := range m.Content {
+		if block.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
+}
+
+// CollapseToolResults replaces every tool_result block's Content with the
+// given placeholder string. Image/document tool_result content is dropped
+// in the process — context-collapse trades fidelity for tokens, and binary
+// blobs are the worst offenders. ToolUseID and IsError are preserved so the
+// pairing with the prior assistant tool_use stays valid.
+func (m *anthropicChatMessage) CollapseToolResults(placeholder string) int {
+	if m == nil {
+		return 0
+	}
+	count := 0
+	for i := range m.Content {
+		if m.Content[i].Type != "tool_result" {
+			continue
+		}
+		// Skip if it's already shorter than the placeholder — collapsing
+		// would be a tokens-net-zero or worse.
+		if s, ok := m.Content[i].Content.(string); ok && len(s) <= len(placeholder) {
+			continue
+		}
+		m.Content[i].Content = placeholder
+		count++
+	}
+	return count
 }
 
 func (m *anthropicChatMessage) GetUsage() *uctypes.AIUsage {
@@ -192,8 +229,15 @@ type anthropicWebSearchTool struct {
 }
 
 type anthropicCacheControl struct {
-	Type string `json:"type"` // "ephemeral"
-	TTL  string `json:"ttl"`  // "5m" or "1h"
+	Type string `json:"type"`          // "ephemeral"
+	TTL  string `json:"ttl,omitempty"` // "5m" or "1h"
+}
+
+type anthropicCachedToolDef struct {
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	InputSchema  map[string]any         `json:"input_schema"`
+	CacheControl *anthropicCacheControl `json:"cache_control,omitempty"`
 }
 
 type anthropicMessageObj struct {
@@ -301,16 +345,16 @@ type partialJSON struct {
 }
 
 type streamingState struct {
-	blockMap        map[int]*blockState
-	toolCalls       []uctypes.WaveToolCall
-	stopFromDelta   string
-	msgID           string
-	model           string
-	stepStarted     bool
-	rtnMessage      *anthropicChatMessage
-	usage           *anthropicUsageType
-	chatOpts        uctypes.WaveChatOpts
-	webSearchCount  int
+	blockMap       map[int]*blockState
+	toolCalls      []uctypes.WaveToolCall
+	stopFromDelta  string
+	msgID          string
+	model          string
+	stepStarted    bool
+	rtnMessage     *anthropicChatMessage
+	usage          *anthropicUsageType
+	chatOpts       uctypes.WaveChatOpts
+	webSearchCount int
 }
 
 func (p *partialJSON) Write(s string) {
@@ -343,18 +387,10 @@ func (p *partialJSON) FinalObject() (json.RawMessage, error) {
 	}
 }
 
-// sanitizeHostnameInError removes the Wave cloud hostname from error messages
+// sanitizeHostnameInError strips provider endpoint hostnames from error messages
+// to avoid leaking internal URLs to the user.
 func sanitizeHostnameInError(err error) error {
-	if err == nil {
-		return nil
-	}
-	errStr := err.Error()
-	parsedURL, parseErr := url.Parse(uctypes.DefaultAIEndpoint)
-	if parseErr == nil && parsedURL.Host != "" && strings.Contains(errStr, parsedURL.Host) {
-		errStr = strings.ReplaceAll(errStr, uctypes.DefaultAIEndpoint, "AI service")
-		errStr = strings.ReplaceAll(errStr, parsedURL.Host, "host")
-	}
-	return fmt.Errorf("%s", errStr)
+	return err
 }
 
 // makeThinkingOpts creates thinking options based on level and max tokens
@@ -422,26 +458,26 @@ func RunAnthropicChatStep(
 	sse *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, *anthropicChatMessage, *uctypes.RateLimitInfo, error) {
+) (*uctypes.WaveStopReason, *anthropicChatMessage, error) {
 	if sse == nil {
-		return nil, nil, nil, errors.New("sse handler is nil")
+		return nil, nil, errors.New("sse handler is nil")
 	}
 
 	// Get chat from store
 	chat := chatstore.DefaultChatStore.Get(chatOpts.ChatId)
 	if chat == nil {
-		return nil, nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
+		return nil, nil, fmt.Errorf("chat not found: %s", chatOpts.ChatId)
 	}
 
 	// Validate that chatOpts.Config match the chat's stored configuration
 	if chat.APIType != chatOpts.Config.APIType {
-		return nil, nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
+		return nil, nil, fmt.Errorf("API type mismatch: chat has %s, chatOpts has %s", chat.APIType, chatOpts.Config.APIType)
 	}
 	if !uctypes.AreModelsCompatible(chat.APIType, chat.Model, chatOpts.Config.Model) {
-		return nil, nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
+		return nil, nil, fmt.Errorf("model mismatch: chat has %s, chatOpts has %s", chat.Model, chatOpts.Config.Model)
 	}
 	if chat.APIVersion != chatOpts.Config.APIVersion {
-		return nil, nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
+		return nil, nil, fmt.Errorf("API version mismatch: chat has %s, chatOpts has %s", chat.APIVersion, chatOpts.Config.APIVersion)
 	}
 
 	// Context with timeout if provided.
@@ -454,7 +490,7 @@ func RunAnthropicChatStep(
 	// Validate continuation if provided
 	if cont != nil {
 		if !uctypes.AreModelsCompatible(chat.APIType, chatOpts.Config.Model, cont.Model) {
-			return nil, nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
+			return nil, nil, fmt.Errorf("cannot continue with a different model, model:%q, cont-model:%q", chatOpts.Config.Model, cont.Model)
 		}
 	}
 
@@ -464,7 +500,7 @@ func RunAnthropicChatStep(
 		// Cast to anthropicChatMessage
 		chatMsg, ok := genMsg.(*anthropicChatMessage)
 		if !ok {
-			return nil, nil, nil, fmt.Errorf("expected anthropicChatMessage, got %T", genMsg)
+			return nil, nil, fmt.Errorf("expected anthropicChatMessage, got %T", genMsg)
 		}
 		// Convert to anthropicInputMessage with copied content
 		contentCopy := make([]anthropicMessageContentBlock, len(chatMsg.Content))
@@ -478,43 +514,23 @@ func RunAnthropicChatStep(
 
 	req, err := buildAnthropicHTTPRequest(ctx, anthropicMsgs, chatOpts)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
 	httpClient, err := aiutil.MakeHTTPClient(chatOpts.Config.ProxyURL)
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, err
 	}
 
-	resp, err := httpClient.Do(req)
+	resp, err := httpretry.Do(ctx, httpClient, req, httpretry.DefaultConfig(), "anthropic")
 	if err != nil {
-		return nil, nil, nil, sanitizeHostnameInError(err)
+		return nil, nil, sanitizeHostnameInError(err)
 	}
 	defer resp.Body.Close()
 
-	// Parse rate limit info from header if present (do this before error check)
-	rateLimitInfo := uctypes.ParseRateLimitHeader(resp.Header.Get("X-Wave-RateLimit"))
-
 	ct := resp.Header.Get("Content-Type")
 	if resp.StatusCode != http.StatusOK || !strings.HasPrefix(ct, "text/event-stream") {
-		// Handle 429 rate limit with special logic
-		if resp.StatusCode == http.StatusTooManyRequests && rateLimitInfo != nil {
-			if rateLimitInfo.PReq == 0 && rateLimitInfo.Req > 0 {
-				// Premium requests exhausted, but regular requests available
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindPremiumRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-			if rateLimitInfo.Req == 0 {
-				// All requests exhausted
-				stopReason := &uctypes.WaveStopReason{
-					Kind: uctypes.StopKindRateLimit,
-				}
-				return stopReason, nil, rateLimitInfo, nil
-			}
-		}
-		return nil, nil, rateLimitInfo, parseAnthropicHTTPError(resp)
+		return nil, nil, parseAnthropicHTTPError(resp)
 	}
 
 	// At this point we have a valid SSE stream, so setup SSE handling
@@ -527,7 +543,7 @@ func RunAnthropicChatStep(
 	decoder := eventsource.NewDecoder(resp.Body)
 
 	stopReason, rtnMessage := handleAnthropicStreamingResp(ctx, sse, decoder, cont, chatOpts)
-	return stopReason, rtnMessage, rateLimitInfo, nil
+	return stopReason, rtnMessage, nil
 }
 
 // handleAnthropicStreamingResp processes the SSE stream after HTTP setup is complete

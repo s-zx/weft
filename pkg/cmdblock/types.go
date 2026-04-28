@@ -3,7 +3,7 @@
 
 package cmdblock
 
-import "github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
+import "github.com/s-zx/crest/pkg/cmdblock/cbtypes"
 
 // Re-exports so callers can keep using cmdblock.CmdBlock / cmdblock.StateDone
 // while the actual type lives in the leaf cbtypes package (see cbtypes for why).

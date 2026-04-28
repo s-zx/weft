@@ -1,0 +1,31 @@
+name: Agent Tests
+
+on:
+  pull_request:
+    paths:
+      - "pkg/agent/**"
+      - "pkg/aiusechat/**"
+      - "pkg/util/textdiff/**"
+      - "go.mod"
+      - "go.sum"
+  push:
+    branches:
+      - main
+      - "feat/**"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run agent + aiusechat tests
+        run: go test -count=1 -race ./pkg/agent/... ./pkg/aiusechat/...
+
+      - name: Run golden transcripts
+        run: go test -count=1 -run TestGoldenTranscripts ./pkg/agent/eval/...

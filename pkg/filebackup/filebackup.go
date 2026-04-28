@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/wavebase"
+	"github.com/s-zx/crest/pkg/wavebase"
 )
 
 const BackupRetentionPeriod = 5 * 24 * time.Hour

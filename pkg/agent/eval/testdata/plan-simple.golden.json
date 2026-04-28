@@ -1,0 +1,30 @@
+{
+  "name": "plan-simple",
+  "description": "Agent writes a plan using the write_plan tool in plan mode",
+  "mode": "plan",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a plan for adding user authentication to the app.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_plan", "input": {"title": "Add User Authentication", "content": "## Steps\n1. Add a users table to the database with email, hashed password, and created_at columns\n2. Implement signup endpoint with password hashing via bcrypt\n3. Implement login endpoint that returns a JWT token\n4. Add JWT middleware to protect authenticated routes\n5. Write unit tests for auth handlers and middleware"}}
+          ]
+        },
+        {
+          "text": "I've written a plan for adding user authentication. It covers database schema, signup/login endpoints, JWT middleware, and testing."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_plan"],
+    "files_contain": {
+      ".crest-plans/add-user-authentication.md": "## Steps"
+    }
+  }
+}

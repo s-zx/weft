@@ -11,14 +11,13 @@ import (
 	"reflect"
 
 	"github.com/invopop/jsonschema"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
 )
 
 const WaveSchemaSettingsFileName = "schema/settings.json"
 const WaveSchemaConnectionsFileName = "schema/connections.json"
-const WaveSchemaAiPresetsFileName = "schema/aipresets.json"
 const WaveSchemaWidgetsFileName = "schema/widgets.json"
 const WaveSchemaBackgroundsFileName = "schema/backgrounds.json"
 const WaveSchemaWaveAIFileName = "schema/waveai.json"
@@ -191,12 +190,6 @@ func main() {
 	err = generateSchema(&connectionTemplate, WaveSchemaConnectionsFileName, false)
 	if err != nil {
 		log.Fatalf("connections schema error: %v", err)
-	}
-
-	aiPresetsTemplate := make(map[string]wconfig.AiSettingsType)
-	err = generateSchema(&aiPresetsTemplate, WaveSchemaAiPresetsFileName, false)
-	if err != nil {
-		log.Fatalf("ai presets schema error: %v", err)
 	}
 
 	err = generateWidgetsSchema(WaveSchemaWidgetsFileName)

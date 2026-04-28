@@ -1,0 +1,30 @@
+{
+  "name": "ask-read-file",
+  "description": "Agent reads a file when asked about its contents",
+  "mode": "ask",
+  "setup": {
+    "files": {
+      "hello.txt": "Hello, World!"
+    }
+  },
+  "turns": [
+    {
+      "user": "What's in hello.txt?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/hello.txt"}}
+          ]
+        },
+        {
+          "text": "The file hello.txt contains: \"Hello, World!\""
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file"],
+    "final_text_contains": ["Hello, World!"]
+  }
+}

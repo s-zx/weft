@@ -1,43 +1,34 @@
 // Copyright 2026, s-zx
 // SPDX-License-Identifier: Apache-2.0
 
-import {
-    UseChatSendMessageType,
-    UseChatSetMessagesType,
-    WaveUIMessage,
-    WaveUIMessagePart,
-} from "@/app/aipanel/aitypes";
-import { WaveAIModel } from "@/app/aipanel/waveai-model";
-import { WaveStreamdown } from "@/app/element/streamdown";
-import { FolderIcon } from "@/app/fileexplorer/file-icons";
+import { UseChatSendMessageType, UseChatSetMessagesType, WaveUIMessage } from "@/store/aitypes";
 import { ContextMenuModel } from "@/app/store/contextmenu";
 import { getApi, getBlockMetaKeyAtom, getSettingsKeyAtom } from "@/app/store/global";
 import { globalStore } from "@/app/store/jotaiStore";
 import { waveEventSubscribeSingle } from "@/app/store/wps";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
+import { TermAgentApprovalContext, TermAgentChatProvider, TermAgentMessagePartView } from "@/app/view/term/term-agent";
 import { buildTermSettingsMenuItems } from "@/app/view/term/term-settings-menu";
 import { computeTheme } from "@/app/view/term/termutil";
 import { WorkspaceLayoutModel } from "@/app/workspace/workspace-layout-model";
+import { FolderIcon } from "@/app/fileexplorer/file-icons";
 import { atoms } from "@/store/global";
 import { getWebServerEndpoint } from "@/util/endpoints";
 import { base64ToArray, cn, stringToBase64 } from "@/util/util";
 import { formatRemoteUri } from "@/util/waveutil";
-import { useChat } from "@ai-sdk/react";
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
-import "@xterm/xterm/css/xterm.css";
-import { DefaultChatTransport } from "ai";
+import { quote as shellQuote } from "shell-quote";
 import * as jotai from "jotai";
 import { useAtomValue } from "jotai";
 import * as React from "react";
 import * as ReactDOM from "react-dom";
-import { quote as shellQuote } from "shell-quote";
+import "@xterm/xterm/css/xterm.css";
 import "./termblocks.scss";
 
 const PollIntervalMs = 10_000; // safety net; live updates arrive via wps events
 const MaxRenderedBytesPerBlock = 256 * 1024;
-const TermBlocksAgentCodeBlockMaxWidth = jotai.atom(720);
 // Total xterm buffer capacity per block (viewport + scrollback).  Bytes that
 // scroll off during write land in scrollback and are pulled back when we
 // resize the viewport to match actual content.  Sized well above any realistic
@@ -45,26 +36,11 @@ const TermBlocksAgentCodeBlockMaxWidth = jotai.atom(720);
 const MaxXtermRows = 2000;
 const MinXtermRows = 1;
 
-type TermBlocksAgentTurn = {
-    key: string;
-    ts: number;
-    userMessage: WaveUIMessage | null;
-    assistantMessages: WaveUIMessage[];
-};
-
-type TermBlocksTimelineItem =
-    | {
-          kind: "cmd";
-          key: string;
-          ts: number;
-          block: CmdBlock;
-      }
-    | {
-          kind: "agent";
-          key: string;
-          ts: number;
-          turn: TermBlocksAgentTurn;
-      };
+export type TimelineEntry =
+    | { type: "cmd"; block: CmdBlock; ts: number }
+    | { type: "agent-user"; id: string; text: string; mode: string; ts: number }
+    | { type: "agent-response"; message: WaveUIMessage; streaming: boolean; ts: number }
+    | { type: "agent-error"; id: string; text: string; ts: number };
 
 export class TermBlocksViewModel implements ViewModel {
     viewType: string;
@@ -95,23 +71,47 @@ export class TermBlocksViewModel implements ViewModel {
     hiddenOidsAtom: jotai.PrimitiveAtom<Set<string>>;
     historyAtom: jotai.PrimitiveAtom<string[]>;
     selectedOidAtom: jotai.PrimitiveAtom<string>;
-    termAgentComposerOpenAtom: jotai.PrimitiveAtom<boolean>;
-    termAgentInputAtom: jotai.PrimitiveAtom<string>;
-    termAgentErrorAtom: jotai.PrimitiveAtom<string | null>;
-    termAgentChatIdAtom: jotai.PrimitiveAtom<string>;
-    termAgentMessagesAtom: jotai.PrimitiveAtom<WaveUIMessage[]>;
-    termAgentMessageTsAtom: jotai.PrimitiveAtom<Record<string, number>>;
-    termAgentStatusAtom: jotai.PrimitiveAtom<string>;
-    termAgentSendMessage: UseChatSendMessageType | null = null;
-    termAgentSetMessages: UseChatSetMessagesType | null = null;
-    termAgentStop: (() => void) | null = null;
-    termAgentRealMessage: any | null = null;
 
     disposed = false;
     pollTimer: ReturnType<typeof setInterval> | null = null;
     unsubs: (() => void)[] = [];
-    inputRef: React.RefObject<HTMLInputElement | null> = React.createRef();
-    agentInputRef: React.RefObject<HTMLTextAreaElement | null> = React.createRef();
+    inputRef: React.RefObject<HTMLTextAreaElement | null> = React.createRef();
+
+    termAgentVisible = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
+    termAgentComposerOpen = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
+    termAgentInput = jotai.atom("") as jotai.PrimitiveAtom<string>;
+    termAgentNotice = jotai.atom(null) as jotai.PrimitiveAtom<string | null>;
+    termAgentChatId = jotai.atom(crypto.randomUUID()) as jotai.PrimitiveAtom<string>;
+    // Permissions posture — see term-model.ts for the contract. Defaults
+    // to acceptEdits per design §5.
+    termAgentPosture = jotai.atom("acceptEdits") as jotai.PrimitiveAtom<string>;
+    agentEntriesAtom = jotai.atom<TimelineEntry[]>([]) as jotai.PrimitiveAtom<TimelineEntry[]>;
+    // Conversation-area errors. Mid-run failures (rate limit, network,
+    // provider 5xx) belong in the chat flow next to the user's
+    // triggering message, not in the input-row error bar (which is
+    // for immediate user-action feedback like "Model switched to X").
+    // syncAgentMessages folds these into the timeline.
+    agentErrorsAtom = jotai.atom<{ id: string; text: string; ts: number }[]>([]) as jotai.PrimitiveAtom<
+        { id: string; text: string; ts: number }[]
+    >;
+    // Stable timestamps for ai-sdk messages — useChat doesn't always
+    // populate createdAt, and re-running syncAgentMessages every status
+    // tick would otherwise stamp every message with `now` and push the
+    // whole chat past any concurrent shell command. We snapshot the
+    // first-seen ts per message id and reuse it on later syncs.
+    agentMsgTsMap: Map<string, number> = new Map();
+    timelineAtom!: jotai.Atom<TimelineEntry[]>;
+    termAgentSendMessage: UseChatSendMessageType | null = null;
+    termAgentSetMessages: UseChatSetMessagesType | null = null;
+    termAgentStop: (() => void) | null = null;
+    // Mirrors useChat's status ("ready" | "submitted" | "streaming"). An
+    // atom so the timeline can render a "thinking" placeholder while we
+    // wait for the first model chunk — without this, the gap between
+    // submit and stream-start looks like the agent is unresponsive.
+    termAgentChatStatusAtom = jotai.atom<string>("ready") as jotai.PrimitiveAtom<string>;
+    termAgentChatStatus: string = "ready";
+    termAgentRealMessage: any | null = null;
+    termAgentPendingContext: { cwd?: string; connection?: string; last_command?: string } = {};
 
     constructor({ blockId }: ViewModelInitType) {
         this.viewType = "termblocks";
@@ -165,15 +165,17 @@ export class TermBlocksViewModel implements ViewModel {
         this.hiddenOidsAtom = jotai.atom<Set<string>>(new Set<string>()) as jotai.PrimitiveAtom<Set<string>>;
         this.historyAtom = jotai.atom<string[]>([]) as jotai.PrimitiveAtom<string[]>;
         this.selectedOidAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
-        this.termAgentComposerOpenAtom = jotai.atom<boolean>(false) as jotai.PrimitiveAtom<boolean>;
-        this.termAgentInputAtom = jotai.atom<string>("") as jotai.PrimitiveAtom<string>;
-        this.termAgentErrorAtom = jotai.atom<string | null>(null) as jotai.PrimitiveAtom<string | null>;
-        this.termAgentChatIdAtom = jotai.atom<string>(crypto.randomUUID()) as jotai.PrimitiveAtom<string>;
-        this.termAgentMessagesAtom = jotai.atom<WaveUIMessage[]>([]) as jotai.PrimitiveAtom<WaveUIMessage[]>;
-        this.termAgentMessageTsAtom = jotai.atom<Record<string, number>>({}) as jotai.PrimitiveAtom<
-            Record<string, number>
-        >;
-        this.termAgentStatusAtom = jotai.atom<string>("ready") as jotai.PrimitiveAtom<string>;
+        this.timelineAtom = jotai.atom((get): TimelineEntry[] => {
+            const blocks = get(this.blocksAtom);
+            const minSeq = get(this.minVisibleSeqAtom);
+            const hidden = get(this.hiddenOidsAtom);
+            const agentEntries = get(this.agentEntriesAtom);
+            const cmdEntries: TimelineEntry[] = blocks
+                .filter((b) => b.state !== "prompt" && b.seq > minSeq && !hidden.has(b.oid))
+                .map((b) => ({ type: "cmd" as const, block: b, ts: b.tspromptns / 1e6 }));
+            if (agentEntries.length === 0) return cmdEntries;
+            return [...cmdEntries, ...agentEntries].sort((a, b) => a.ts - b.ts);
+        });
         // Initial RPC work is deferred because TabRpcClient is a live binding
         // that can still be undefined during module-evaluation / first-render
         // right after an HMR reload. queueMicrotask runs after module eval is
@@ -322,7 +324,11 @@ export class TermBlocksViewModel implements ViewModel {
         // xterm renders the frozen result. During "running" we've been
         // appending via chunk events, so the cached buffer should already
         // cover the output.
-        if (row.state === "done" && row.outputstartoffset != null && row.outputendoffset != null) {
+        if (
+            row.state === "done" &&
+            row.outputstartoffset != null &&
+            row.outputendoffset != null
+        ) {
             const cache = globalStore.get(this.outputCacheAtom);
             const existing = cache[row.oid];
             const expected = row.outputendoffset - row.outputstartoffset;
@@ -400,170 +406,6 @@ export class TermBlocksViewModel implements ViewModel {
         void this.sendBytes("\x03");
     }
 
-    registerTermAgentChat(
-        sendMessage: UseChatSendMessageType,
-        setMessages: UseChatSetMessagesType,
-        status: string,
-        stop: () => void
-    ) {
-        this.termAgentSendMessage = sendMessage;
-        this.termAgentSetMessages = setMessages;
-        this.termAgentStop = stop;
-        if (globalStore.get(this.termAgentStatusAtom) !== status) {
-            globalStore.set(this.termAgentStatusAtom, status);
-        }
-    }
-
-    syncTermAgentMessages(messages: WaveUIMessage[]) {
-        const currentTs = globalStore.get(this.termAgentMessageTsAtom);
-        let nextTs = currentTs;
-        let lastTs = 0;
-        for (const value of Object.values(currentTs)) {
-            if (value > lastTs) {
-                lastTs = value;
-            }
-        }
-        for (const message of messages) {
-            if (nextTs[message.id] != null) {
-                continue;
-            }
-            if (nextTs === currentTs) {
-                nextTs = { ...currentTs };
-            }
-            const nowNs = Date.now() * 1_000_000;
-            lastTs = Math.max(lastTs + 1, nowNs);
-            nextTs[message.id] = lastTs;
-        }
-        globalStore.set(this.termAgentMessagesAtom, messages);
-        if (nextTs !== currentTs) {
-            globalStore.set(this.termAgentMessageTsAtom, nextTs);
-        }
-    }
-
-    getAndClearTermAgentMessage(): any | null {
-        const msg = this.termAgentRealMessage;
-        this.termAgentRealMessage = null;
-        return msg;
-    }
-
-    setTermAgentError(message: string | null) {
-        globalStore.set(this.termAgentErrorAtom, message);
-    }
-
-    getTermAgentMode(): string {
-        const aiModel = WaveAIModel.getInstance();
-        const currentMode = globalStore.get(aiModel.currentAIMode);
-        if (currentMode && aiModel.isValidMode(currentMode)) {
-            return currentMode;
-        }
-        const defaultMode = globalStore.get(aiModel.defaultModeAtom);
-        if (defaultMode && aiModel.isValidMode(defaultMode)) {
-            return defaultMode;
-        }
-        return currentMode ?? defaultMode ?? "";
-    }
-
-    openTermAgentComposer() {
-        globalStore.set(this.termAgentComposerOpenAtom, true);
-        globalStore.set(this.termAgentInputAtom, "");
-        globalStore.set(this.termAgentErrorAtom, null);
-    }
-
-    closeTermAgentComposer() {
-        globalStore.set(this.termAgentComposerOpenAtom, false);
-        globalStore.set(this.termAgentInputAtom, "");
-    }
-
-    clearTermAgentSession() {
-        this.termAgentStop?.();
-        globalStore.set(this.termAgentChatIdAtom, crypto.randomUUID());
-        globalStore.set(this.termAgentMessagesAtom, []);
-        globalStore.set(this.termAgentMessageTsAtom, {});
-        globalStore.set(this.termAgentStatusAtom, "ready");
-        globalStore.set(this.termAgentErrorAtom, null);
-        this.termAgentSetMessages?.([]);
-    }
-
-    canOpenTermAgent(): boolean {
-        const blocks = globalStore.get(this.blocksAtom);
-        return !blocks.some((block) => block.state === "running");
-    }
-
-    buildTermAgentPrompt(userInput: string): string {
-        const cwd = globalStore.get(this.blockCwdAtom);
-        const connName = globalStore.get(getBlockMetaKeyAtom(this.blockId, "connection"));
-        const blocks = globalStore.get(this.blocksAtom);
-        const lastCommand = [...blocks]
-            .reverse()
-            .find((block) => typeof block.cmd === "string" && block.cmd.trim() !== "")?.cmd;
-        const contextLines = [`block_id: ${this.blockId}`];
-        if (connName) {
-            contextLines.push(`connection: ${connName}`);
-        }
-        if (cwd) {
-            contextLines.push(`cwd: ${cwd}`);
-        }
-        if (lastCommand) {
-            contextLines.push(`last_command: ${lastCommand}`);
-        }
-        return [
-            "You are the native in-terminal agent inside Crest.",
-            "The user invoked you from a termblocks timeline. Use tab context and tools when needed.",
-            "If a tool action needs approval, wait for the user to approve it inline.",
-            "",
-            "<terminal_context>",
-            ...contextLines,
-            "</terminal_context>",
-            "",
-            "<user_request>",
-            userInput,
-            "</user_request>",
-        ].join("\n");
-    }
-
-    async submitTermAgentPrompt(): Promise<void> {
-        const userInput = globalStore.get(this.termAgentInputAtom).trim();
-        if (userInput === "") {
-            this.closeTermAgentComposer();
-            return;
-        }
-        const status = globalStore.get(this.termAgentStatusAtom);
-        if (status === "streaming" || status === "submitted") {
-            return;
-        }
-        if (!this.termAgentSendMessage) {
-            this.setTermAgentError("Terminal agent is still initializing.");
-            return;
-        }
-        const aiMode = this.getTermAgentMode();
-        if (!aiMode) {
-            this.setTermAgentError("Configure an AI mode and API key before using the terminal agent.");
-            return;
-        }
-        if (userInput === "clear" || userInput === "new") {
-            this.clearTermAgentSession();
-            this.closeTermAgentComposer();
-            return;
-        }
-
-        this.termAgentRealMessage = {
-            messageid: crypto.randomUUID(),
-            parts: [{ type: "text", text: this.buildTermAgentPrompt(userInput) }],
-        };
-        globalStore.set(this.termAgentErrorAtom, null);
-        this.closeTermAgentComposer();
-
-        try {
-            await this.termAgentSendMessage({
-                parts: [{ type: "text", text: userInput }] as any,
-            });
-        } catch (error) {
-            console.error("failed to submit termblocks agent prompt", error);
-            const message = error instanceof Error ? error.message : String(error);
-            this.setTermAgentError(message);
-        }
-    }
-
     async fetchBlocks() {
         try {
             const rows = await RpcApi.GetCmdBlocksCommand(TabRpcClient, {
@@ -626,11 +468,6 @@ export class TermBlocksViewModel implements ViewModel {
     }
 
     giveFocus(): boolean {
-        const agentOpen = globalStore.get(this.termAgentComposerOpenAtom);
-        if (agentOpen && this.agentInputRef.current != null) {
-            this.agentInputRef.current.focus();
-            return document.activeElement === this.agentInputRef.current;
-        }
         const el = this.inputRef.current;
         if (el == null) {
             return false;
@@ -662,6 +499,329 @@ export class TermBlocksViewModel implements ViewModel {
     getSettingsMenuItems(): ContextMenuItem[] {
         return buildTermSettingsMenuItems({ blockId: this.blockId });
     }
+
+    get tabModel(): { tabId: string } {
+        return { tabId: globalStore.get(atoms.staticTabId) };
+    }
+
+    openTermAgentComposer() {
+        globalStore.set(this.termAgentVisible, true);
+        globalStore.set(this.termAgentComposerOpen, true);
+        globalStore.set(this.termAgentInput, "");
+        globalStore.set(this.termAgentNotice, null);
+    }
+
+    closeTermAgentComposer() {
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+    }
+
+    hideTermAgentOverlay() {
+        globalStore.set(this.termAgentVisible, false);
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+    }
+
+    setTermAgentNotice(message: string | null) {
+        globalStore.set(this.termAgentNotice, message);
+    }
+
+    buildTermAgentContext(): { cwd?: string; connection?: string; last_command?: string } {
+        const cwd = this.worktreePath ?? globalStore.get(this.blockCwdAtom);
+        const blocks = globalStore.get(this.blocksAtom);
+        const lastDone = [...blocks].reverse().find((b) => b.state === "done");
+        return {
+            cwd: cwd || undefined,
+            last_command: lastDone?.cmd ?? undefined,
+        };
+    }
+
+    async submitTermAgentPrompt(): Promise<void> {
+        const userInput = globalStore.get(this.termAgentInput).trim();
+        if (userInput === "") {
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (this.termAgentChatStatus === "streaming" || this.termAgentChatStatus === "submitted") {
+            return;
+        }
+        if (userInput.toLowerCase() === "new") {
+            this.clearTermAgentSession();
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (userInput.toLowerCase() === "rewind") {
+            this.rewindFiles();
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (userInput.startsWith("worktree")) {
+            this.handleWorktreeCommand(userInput);
+            this.closeTermAgentComposer();
+            return;
+        }
+        if (userInput.startsWith("model ")) {
+            const modelName = userInput.slice("model ".length).trim();
+            if (modelName) {
+                globalStore.set(this.termAgentModelOverrideAtom, modelName);
+                globalStore.set(this.termAgentChatId, crypto.randomUUID());
+                globalStore.set(this.termAgentNotice, `Model switched to: ${modelName}`);
+                this.closeTermAgentComposer();
+            }
+            return;
+        }
+        // Permissions v2: no mode prefix routing. Raw user input goes
+        // straight to the agent in "do" mode; posture (Shift+Tab) is
+        // the only per-chat strictness control.
+        globalStore.set(this.termAgentNotice, null);
+        this.termAgentRealMessage = { messageid: crypto.randomUUID(), parts: [{ type: "text", text: userInput }] };
+        this.termAgentPendingContext = this.buildTermAgentContext();
+        globalStore.set(this.termAgentComposerOpen, false);
+        globalStore.set(this.termAgentInput, "");
+        if (this.termAgentSendMessage) {
+            await this.termAgentSendMessage({ parts: [{ type: "text", text: userInput }] });
+        }
+    }
+
+    registerTermAgentChat(
+        sendMessage: UseChatSendMessageType,
+        setMessages: UseChatSetMessagesType,
+        status: string,
+        stop: () => void
+    ) {
+        this.termAgentSendMessage = sendMessage;
+        this.termAgentSetMessages = setMessages;
+        this.termAgentChatStatus = status;
+        globalStore.set(this.termAgentChatStatusAtom, status);
+        this.termAgentStop = stop;
+    }
+
+    // Atom (not plain field) so the footer + model picker re-render
+    // when the override changes — both via the `model xxx` shell
+    // command and the new picker UI.
+    termAgentModelOverrideAtom = jotai.atom<string | null>(null) as jotai.PrimitiveAtom<string | null>;
+
+    getAndClearTermAgentMessage(): any {
+        return this.termAgentRealMessage ?? { messageid: crypto.randomUUID(), parts: [{ type: "text", text: "continue" }] };
+    }
+
+    getTermAgentModelOverride(): string {
+        return globalStore.get(this.termAgentModelOverrideAtom) ?? "";
+    }
+
+    getAndClearTermAgentPendingContext(): any {
+        const ctx = this.termAgentPendingContext;
+        this.termAgentPendingContext = {};
+        return ctx;
+    }
+
+    // Stable cwd accessor for the permission approval prompt — needs
+    // current cwd when the user picks "save to this project".
+    // Mirrors term-model's implementation but the focused block id may
+    // shift across calls in the multi-block view, so always query live.
+    getTermAgentCwd(): string | undefined {
+        const cwd = globalStore.get(this.blockCwdAtom);
+        return cwd || undefined;
+    }
+
+    syncAgentMessages(messages: WaveUIMessage[], status: string) {
+        this.termAgentChatStatus = status;
+        globalStore.set(this.termAgentChatStatusAtom, status);
+        const entries: TimelineEntry[] = [];
+        for (const msg of messages) {
+            // Use the message's createdAt if useChat populated it;
+            // otherwise pin to first-seen wall-clock time. Either way
+            // each message id keeps a stable ts across re-syncs so
+            // interleaving with cmd blocks (which carry tspromptns)
+            // is order-stable.
+            const supplied = (msg as any).createdAt?.getTime?.();
+            let ts: number;
+            if (typeof supplied === "number") {
+                ts = supplied;
+            } else {
+                ts = this.agentMsgTsMap.get(msg.id) ?? Date.now();
+                if (!this.agentMsgTsMap.has(msg.id)) {
+                    this.agentMsgTsMap.set(msg.id, ts);
+                }
+            }
+            if (msg.role === "user") {
+                const text = (msg.parts ?? [])
+                    .filter((p) => p.type === "text")
+                    .map((p) => (p as any).text ?? "")
+                    .join("\n");
+                if (text) {
+                    // Permissions v2: timeline entries no longer carry a
+                    // mode tag — the agent always runs in "do". Posture
+                    // is per-chat, not per-message; doesn't belong on
+                    // timeline entries.
+                    entries.push({ type: "agent-user", id: msg.id, text, mode: "do", ts });
+                }
+            } else if (msg.role === "assistant") {
+                const isLast = msg === messages[messages.length - 1];
+                const streaming = (status === "streaming" || status === "submitted") && isLast;
+                entries.push({ type: "agent-response", message: msg, streaming, ts });
+            }
+        }
+        // Fold conversation-area errors in by timestamp so they sit
+        // next to the message that triggered them (typically right
+        // after the latest user message / partial assistant reply).
+        for (const err of globalStore.get(this.agentErrorsAtom)) {
+            entries.push({ type: "agent-error", id: err.id, text: err.text, ts: err.ts });
+        }
+        entries.sort((a, b) => a.ts - b.ts);
+        globalStore.set(this.agentEntriesAtom, entries);
+    }
+
+    // addTermAgentChatError appends a conversation-area error. Used by
+    // useTermAgentChat's onError for mid-run model/network failures
+    // — the error renders inline in the timeline next to the user's
+    // triggering message, looking just like an assistant response
+    // (only red-tinted) because it conceptually IS the agent's
+    // response for this turn. Pushes to the errors atom and re-merges
+    // the timeline so the new error shows up at the right ts position.
+    addTermAgentChatError(text: string) {
+        const ts = Date.now();
+        const newErr = { id: crypto.randomUUID(), text, ts };
+        globalStore.set(this.agentErrorsAtom, [...globalStore.get(this.agentErrorsAtom), newErr]);
+        // Splice into the live timeline. Errors are tail-of-turn so
+        // appending then sorting is sufficient — sorting is needed
+        // only because future model-message arrivals may have ts
+        // values older than the error's (clock skew or batched
+        // syncAgentMessages updates).
+        const entries = globalStore.get(this.agentEntriesAtom);
+        const merged: TimelineEntry[] = [
+            ...entries,
+            { type: "agent-error", id: newErr.id, text: newErr.text, ts },
+        ];
+        merged.sort((a, b) => a.ts - b.ts);
+        globalStore.set(this.agentEntriesAtom, merged);
+    }
+
+    termAgentLastPlanPath: string | null = null;
+    termAgentPendingPlanPath: string | null = null;
+
+    clearTermAgentSession() {
+        if (this.termAgentSetMessages) {
+            this.termAgentSetMessages([]);
+        }
+        globalStore.set(this.termAgentChatId, crypto.randomUUID());
+        globalStore.set(this.termAgentNotice, null);
+        globalStore.set(this.agentErrorsAtom, []);
+        globalStore.set(this.agentEntriesAtom, []);
+        this.agentMsgTsMap.clear();
+        this.termAgentLastPlanPath = null;
+        globalStore.set(this.termAgentModelOverrideAtom, null);
+    }
+
+    getAndClearTermAgentPlanPath(): string {
+        const path = this.termAgentPendingPlanPath;
+        this.termAgentPendingPlanPath = null;
+        return path ?? "";
+    }
+
+    executePlan() {
+        if (!this.termAgentLastPlanPath || !this.termAgentSendMessage) {
+            return;
+        }
+        this.termAgentPendingPlanPath = this.termAgentLastPlanPath;
+        this.termAgentRealMessage = {
+            messageid: crypto.randomUUID(),
+            parts: [{ type: "text", text: "go" }],
+        };
+        this.termAgentPendingContext = this.buildTermAgentContext();
+        globalStore.set(this.termAgentNotice, null);
+        this.closeTermAgentComposer();
+        this.termAgentLastPlanPath = null;
+        this.termAgentSendMessage({ parts: [{ type: "text", text: "go" }] });
+    }
+
+    worktreePath: string | null = null;
+    worktreeName: string | null = null;
+
+    async handleWorktreeCommand(input: string) {
+        const parts = input.split(/\s+/);
+        const sub = parts[1] ?? "";
+
+        if (sub === "exit" || sub === "remove" || sub === "discard") {
+            if (!this.worktreePath) {
+                globalStore.set(this.termAgentNotice, "No active worktree");
+                return;
+            }
+            const force = sub === "discard";
+            try {
+                const resp = await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        action: "remove",
+                        cwd: globalStore.get(this.blockCwdAtom),
+                        path: this.worktreePath,
+                        force,
+                    }),
+                });
+                if (!resp.ok) {
+                    const text = await resp.text();
+                    if (resp.status === 409) {
+                        globalStore.set(
+                            this.termAgentNotice,
+                            "Worktree has uncommitted changes — commit/push first, or run `:worktree discard` to throw them away."
+                        );
+                    } else {
+                        globalStore.set(this.termAgentNotice, `Failed to remove worktree: ${text}`);
+                    }
+                    return;
+                }
+                globalStore.set(this.termAgentNotice, `Worktree ${this.worktreeName} removed`);
+                this.worktreePath = null;
+                this.worktreeName = null;
+            } catch (e) {
+                globalStore.set(this.termAgentNotice, `Failed to remove worktree: ${e}`);
+            }
+            return;
+        }
+
+        const name = sub || undefined;
+        const cwd = globalStore.get(this.blockCwdAtom);
+        try {
+            const resp = await fetch(`${getWebServerEndpoint()}/api/agent-worktree`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ action: "create", cwd, name }),
+            });
+            if (!resp.ok) {
+                const text = await resp.text();
+                globalStore.set(this.termAgentNotice, `Worktree failed: ${text}`);
+                return;
+            }
+            const data = await resp.json();
+            this.worktreePath = data.path;
+            this.worktreeName = data.name;
+            globalStore.set(this.termAgentNotice, `Worktree created: ${data.name} (branch ${data.branch})`);
+        } catch (e) {
+            globalStore.set(this.termAgentNotice, `Worktree failed: ${e}`);
+        }
+    }
+
+    async rewindFiles() {
+        const chatId = globalStore.get(this.termAgentChatId);
+        try {
+            const resp = await fetch(`${getWebServerEndpoint()}/api/agent-rewind`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ chatid: chatId }),
+            });
+            if (!resp.ok) {
+                const text = await resp.text();
+                globalStore.set(this.termAgentNotice, `Rewind failed: ${text}`);
+                return;
+            }
+            const data = await resp.json();
+            globalStore.set(this.termAgentNotice, `Rewound: ${data.restored} file(s) restored`);
+        } catch (e) {
+            globalStore.set(this.termAgentNotice, `Rewind failed: ${e}`);
+        }
+    }
+
 }
 
 // countVisibleLines strips ANSI escapes (CSI + OSC) from bytes, splits on
@@ -755,10 +915,7 @@ const AltScreenXterm: React.FC<{
 
     React.useEffect(() => {
         const host = containerRef.current;
-        console.log("[cd-bug] AltScreenXterm mount", {
-            hasHost: host != null,
-            hostRect: host?.getBoundingClientRect(),
-        });
+        console.log("[cd-bug] AltScreenXterm mount", { hasHost: host != null, hostRect: host?.getBoundingClientRect() });
         if (host == null) return;
         let term: Terminal;
         let fit: FitAddon;
@@ -832,11 +989,7 @@ const AltScreenXterm: React.FC<{
         if (bytes.length === written) {
             return;
         }
-        console.log("[cd-bug] AltScreenXterm writing", {
-            written,
-            newLen: bytes.length,
-            delta: bytes.length - written,
-        });
+        console.log("[cd-bug] AltScreenXterm writing", { written, newLen: bytes.length, delta: bytes.length - written });
         try {
             if (bytes.length < written) {
                 term.reset();
@@ -992,7 +1145,9 @@ const XtermOutput: React.FC<{
     React.useEffect(() => {
         const term = termRef.current;
         if (term == null) return;
-        const t = interactive ? theme : { ...theme, cursor: "transparent", cursorAccent: "transparent" };
+        const t = interactive
+            ? theme
+            : { ...theme, cursor: "transparent", cursorAccent: "transparent" };
         term.options.theme = t;
     }, [theme, interactive]);
 
@@ -1168,7 +1323,7 @@ const TermBlockRow: React.FC<{
     const cwd = shortenCwd(block.cwd ?? fallbackCwd, home);
     const duration = formatDuration(block.durationms);
     const branch = gitInfo?.isrepo ? gitInfo.branch : "";
-    const hasDiff = gitInfo?.isrepo && (gitInfo.changedfiles ?? 0) > 0;
+    const hasDiff = gitInfo?.isrepo && ((gitInfo.changedfiles ?? 0) > 0);
 
     const openMenu = (e: React.MouseEvent) => {
         e.preventDefault();
@@ -1300,394 +1455,6 @@ const TermBlockRow: React.FC<{
 };
 TermBlockRow.displayName = "TermBlockRow";
 
-const TermBlocksAgentApprovalButtons = React.memo(({ toolCallId }: { toolCallId: string }) => {
-    const [approvalOverride, setApprovalOverride] = React.useState<string | null>(null);
-
-    const sendApproval = (approval: "user-approved" | "user-denied") => {
-        setApprovalOverride(approval);
-        RpcApi.WaveAIToolApproveCommand(TabRpcClient, {
-            toolcallid: toolCallId,
-            approval,
-        });
-    };
-
-    return (
-        <div className="termblocks-agent-actions">
-            <button type="button" className="termblocks-agent-button" onClick={() => sendApproval("user-approved")}>
-                {approvalOverride === "user-approved" ? "Approved" : "Approve"}
-            </button>
-            <button
-                type="button"
-                className="termblocks-agent-button termblocks-agent-button-danger"
-                onClick={() => sendApproval("user-denied")}
-            >
-                {approvalOverride === "user-denied" ? "Denied" : "Deny"}
-            </button>
-        </div>
-    );
-});
-TermBlocksAgentApprovalButtons.displayName = "TermBlocksAgentApprovalButtons";
-
-const TermBlocksAgentToolUse = React.memo(
-    ({ part, isStreaming }: { part: WaveUIMessagePart; isStreaming: boolean }) => {
-        if (part.type !== "data-tooluse") {
-            return null;
-        }
-
-        const toolData = part.data;
-        const status = toolData?.status ?? "pending";
-        const approval = toolData?.approval ?? "";
-        const isError = status === "error";
-        const isDone = status === "completed";
-        const toolDesc = toolData?.tooldesc || toolData?.toolname || "Tool call";
-        const errorText =
-            toolData?.errormessage || (!isStreaming && approval === "needs-approval" ? "Approval timed out." : "");
-
-        return (
-            <div className="termblocks-agent-tooluse">
-                <div className="termblocks-agent-tooluse-head">
-                    <span
-                        className={cn(
-                            "termblocks-agent-tooluse-dot",
-                            isDone && "is-done",
-                            isError && "is-error",
-                            !isDone && !isError && "is-pending"
-                        )}
-                    >
-                        {isDone ? "✓" : isError ? "!" : "•"}
-                    </span>
-                    <div className="termblocks-agent-tooluse-copy">
-                        <div className="termblocks-agent-tooluse-title">{toolDesc}</div>
-                        <div className="termblocks-agent-tooluse-name">{toolData?.toolname ?? "tool"}</div>
-                    </div>
-                </div>
-                {errorText && <div className="termblocks-agent-error">{errorText}</div>}
-                {approval === "needs-approval" && isStreaming && toolData?.toolcallid && (
-                    <TermBlocksAgentApprovalButtons toolCallId={toolData.toolcallid} />
-                )}
-            </div>
-        );
-    }
-);
-TermBlocksAgentToolUse.displayName = "TermBlocksAgentToolUse";
-
-const TermBlocksAgentToolProgress = React.memo(({ part }: { part: WaveUIMessagePart }) => {
-    if (part.type !== "data-toolprogress") {
-        return null;
-    }
-    const lines = Array.isArray(part.data?.statuslines) ? part.data.statuslines : [];
-    if (lines.length === 0) {
-        return null;
-    }
-    return (
-        <div className="termblocks-agent-progress">
-            {lines.map((line, idx) => (
-                <div key={`${idx}:${line}`}>{line}</div>
-            ))}
-        </div>
-    );
-});
-TermBlocksAgentToolProgress.displayName = "TermBlocksAgentToolProgress";
-
-const TermBlocksAgentMessagePartView = React.memo(
-    ({ part, isStreaming }: { part: WaveUIMessagePart; isStreaming: boolean }) => {
-        if (part.type === "text") {
-            return (
-                <WaveStreamdown
-                    text={part.text ?? ""}
-                    parseIncompleteMarkdown={isStreaming}
-                    className="termblocks-agent-markdown"
-                    codeBlockMaxWidthAtom={TermBlocksAgentCodeBlockMaxWidth}
-                />
-            );
-        }
-
-        if (part.type === "reasoning") {
-            return (
-                <details className="termblocks-agent-reasoning">
-                    <summary>Reasoning</summary>
-                    <div className="termblocks-agent-reasoning-body">{part.text ?? ""}</div>
-                </details>
-            );
-        }
-
-        if (part.type === "data-tooluse") {
-            return <TermBlocksAgentToolUse part={part} isStreaming={isStreaming} />;
-        }
-
-        if (part.type === "data-toolprogress") {
-            return <TermBlocksAgentToolProgress part={part} />;
-        }
-
-        return null;
-    }
-);
-TermBlocksAgentMessagePartView.displayName = "TermBlocksAgentMessagePartView";
-
-function getTermBlocksAgentVisibleParts(message: WaveUIMessage): WaveUIMessagePart[] {
-    return (message.parts ?? []).filter((part) => {
-        return (
-            part.type === "text" ||
-            part.type === "reasoning" ||
-            part.type === "data-tooluse" ||
-            part.type === "data-toolprogress"
-        );
-    });
-}
-
-function getTermBlocksAgentUserText(message: WaveUIMessage | null): string {
-    if (message == null) {
-        return "";
-    }
-    return getTermBlocksAgentVisibleParts(message)
-        .filter((part) => part.type === "text")
-        .map((part) => part.text ?? "")
-        .join("\n\n");
-}
-
-function groupTermBlocksAgentTurns(
-    messages: WaveUIMessage[],
-    messageTs: Record<string, number>
-): TermBlocksAgentTurn[] {
-    const turns: TermBlocksAgentTurn[] = [];
-    let currentTurn: TermBlocksAgentTurn | null = null;
-
-    for (const message of messages) {
-        if (message.role === "system") {
-            continue;
-        }
-        const ts = messageTs[message.id] ?? 0;
-        if (message.role === "user") {
-            if (currentTurn != null) {
-                turns.push(currentTurn);
-            }
-            currentTurn = {
-                key: message.id,
-                ts,
-                userMessage: message,
-                assistantMessages: [],
-            };
-            continue;
-        }
-        if (message.role === "assistant") {
-            if (currentTurn == null) {
-                currentTurn = {
-                    key: message.id,
-                    ts,
-                    userMessage: null,
-                    assistantMessages: [],
-                };
-            }
-            currentTurn.assistantMessages.push(message);
-        }
-    }
-
-    if (currentTurn != null) {
-        turns.push(currentTurn);
-    }
-
-    return turns;
-}
-
-function getTermBlocksAgentTurnMeasure(turn: TermBlocksAgentTurn): number {
-    let size = getTermBlocksAgentUserText(turn.userMessage).length;
-    for (const message of turn.assistantMessages) {
-        for (const part of getTermBlocksAgentVisibleParts(message)) {
-            if (part.type === "text" || part.type === "reasoning") {
-                size += part.text?.length ?? 0;
-                continue;
-            }
-            if (part.type === "data-toolprogress") {
-                size += (part.data?.statuslines ?? []).join("\n").length;
-                continue;
-            }
-            if (part.type === "data-tooluse") {
-                size += (part.data?.tooldesc ?? part.data?.toolname ?? "").length;
-                size += (part.data?.errormessage ?? "").length;
-            }
-        }
-    }
-    return size;
-}
-
-const TermBlocksAgentTurnCard: React.FC<{
-    turn: TermBlocksAgentTurn;
-    mode: string;
-    isStreaming: boolean;
-    errorText: string | null;
-}> = ({ turn, mode, isStreaming, errorText }) => {
-    const userText = getTermBlocksAgentUserText(turn.userMessage);
-    const hasAssistantOutput = turn.assistantMessages.some(
-        (message) => getTermBlocksAgentVisibleParts(message).length > 0
-    );
-
-    return (
-        <div className={cn("termblocks-agent-card", isStreaming && "termblocks-agent-card-streaming")}>
-            <div className="termblocks-agent-card-head">
-                <div className="termblocks-agent-card-title">
-                    <span className="termblocks-agent-kicker">Terminal Agent</span>
-                    <span className="termblocks-agent-mode">{mode || "unconfigured"}</span>
-                </div>
-                {isStreaming && <span className="termblocks-agent-live">Running</span>}
-            </div>
-            {userText && (
-                <div className="termblocks-agent-request">
-                    <div className="termblocks-agent-label">You</div>
-                    <div className="termblocks-agent-request-text">{userText}</div>
-                </div>
-            )}
-            <div className="termblocks-agent-response">
-                <div className="termblocks-agent-label">Agent</div>
-                {hasAssistantOutput ? (
-                    <div className="termblocks-agent-response-body">
-                        {turn.assistantMessages.map((message, messageIndex) => {
-                            const visibleParts = getTermBlocksAgentVisibleParts(message);
-                            if (visibleParts.length === 0) {
-                                return null;
-                            }
-                            const streamingThisMessage =
-                                isStreaming &&
-                                messageIndex === turn.assistantMessages.length - 1 &&
-                                message.role === "assistant";
-                            return (
-                                <div key={message.id} className="termblocks-agent-message">
-                                    {visibleParts.map((part, idx) => (
-                                        <TermBlocksAgentMessagePartView
-                                            key={`${message.id}:${part.type}:${idx}`}
-                                            part={part}
-                                            isStreaming={streamingThisMessage}
-                                        />
-                                    ))}
-                                </div>
-                            );
-                        })}
-                    </div>
-                ) : (
-                    <div className="termblocks-agent-placeholder">
-                        {isStreaming ? "Thinking..." : "No response yet."}
-                    </div>
-                )}
-                {errorText && <div className="termblocks-agent-error">{errorText}</div>}
-            </div>
-        </div>
-    );
-};
-TermBlocksAgentTurnCard.displayName = "TermBlocksAgentTurnCard";
-
-const TermBlocksAgentComposerCard: React.FC<{ model: TermBlocksViewModel; mode: string; errorText: string | null }> = ({
-    model,
-    mode,
-    errorText,
-}) => {
-    const value = useAtomValue(model.termAgentInputAtom);
-    const status = useAtomValue(model.termAgentStatusAtom);
-    const inputRef = model.agentInputRef;
-
-    React.useEffect(() => {
-        inputRef.current?.focus();
-    }, [inputRef]);
-
-    React.useEffect(() => {
-        const textarea = inputRef.current;
-        if (textarea == null) {
-            return;
-        }
-        textarea.style.height = "0px";
-        textarea.style.height = `${Math.min(textarea.scrollHeight, 240)}px`;
-    }, [inputRef, value]);
-
-    return (
-        <div className="termblocks-agent-card termblocks-agent-card-draft">
-            <div className="termblocks-agent-card-head">
-                <div className="termblocks-agent-card-title">
-                    <span className="termblocks-agent-kicker">Terminal Agent</span>
-                    <span className="termblocks-agent-mode">{mode || "unconfigured"}</span>
-                </div>
-                <span className="termblocks-agent-live">Compose</span>
-            </div>
-            <div className="termblocks-agent-request">
-                <div className="termblocks-agent-label">You</div>
-                <textarea
-                    ref={inputRef}
-                    className="termblocks-agent-textarea"
-                    value={value}
-                    rows={1}
-                    placeholder="help me build this feature"
-                    spellCheck={false}
-                    onChange={(e) => globalStore.set(model.termAgentInputAtom, e.target.value)}
-                    onKeyDown={(e) => {
-                        if (e.key === "Escape") {
-                            e.preventDefault();
-                            model.closeTermAgentComposer();
-                            return;
-                        }
-                        if (e.key === "Enter" && !e.shiftKey) {
-                            e.preventDefault();
-                            void model.submitTermAgentPrompt();
-                        }
-                    }}
-                />
-            </div>
-            <div className="termblocks-agent-composer-foot">
-                <div>
-                    {status === "streaming" || status === "submitted"
-                        ? "Agent is busy."
-                        : "Enter to send, Shift+Enter for newline, Esc to cancel."}
-                </div>
-                <div>Type `new` to reset the session.</div>
-            </div>
-            {errorText && <div className="termblocks-agent-error">{errorText}</div>}
-        </div>
-    );
-};
-TermBlocksAgentComposerCard.displayName = "TermBlocksAgentComposerCard";
-
-const TermBlocksAgentSessionBridge: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
-    const chatId = useAtomValue(model.termAgentChatIdAtom);
-
-    const transport = React.useMemo(
-        () =>
-            new DefaultChatTransport({
-                api: `${getWebServerEndpoint()}/api/post-chat-message`,
-                prepareSendMessagesRequest: () => {
-                    return {
-                        body: {
-                            msg: model.getAndClearTermAgentMessage(),
-                            chatid: chatId,
-                            widgetaccess: true,
-                            aimode: model.getTermAgentMode(),
-                            tabid: globalStore.get(atoms.staticTabId),
-                        },
-                    };
-                },
-            }),
-        [chatId, model]
-    );
-
-    const { messages, sendMessage, status, setMessages, stop } = useChat<WaveUIMessage>({
-        transport,
-        onError: (error) => {
-            console.error("termblocks terminal agent error", error);
-            model.setTermAgentError(error.message || "Terminal agent request failed.");
-        },
-    });
-
-    React.useEffect(() => {
-        model.registerTermAgentChat(sendMessage, setMessages, status, stop);
-    }, [model, sendMessage, setMessages, status, stop]);
-
-    React.useEffect(() => {
-        model.syncTermAgentMessages(messages);
-    }, [model, messages]);
-
-    React.useEffect(() => {
-        globalStore.set(model.termAgentStatusAtom, status);
-    }, [model, status]);
-
-    return null;
-};
-TermBlocksAgentSessionBridge.displayName = "TermBlocksAgentSessionBridge";
-
 const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
     const inputRef = model.inputRef;
     const history = useAtomValue(model.historyAtom);
@@ -1702,26 +1469,14 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
         inputRef.current?.focus();
     }, []);
 
-    // Ghost suggestion: latest history entry that starts with the typed prefix
-    // but is strictly longer.  Shown dimmed after the caret; Tab/Right-arrow
-    // accepts it.  Matches the "inline autosuggest" behaviour zsh-autosuggestions
-    // and fish pioneered and Warp echoes.
-    const ghost = React.useMemo(() => {
-        if (!value) return "";
-        for (let i = history.length - 1; i >= 0; i--) {
-            const h = history[i];
-            if (h.length > value.length && h.startsWith(value)) {
-                return h.slice(value.length);
-            }
-        }
-        return "";
-    }, [value, history]);
-
-    const submit = () => {
+    // Permissions v2 routing: `:` prefix is gone. Plain Enter runs the
+    // line as a shell command; Cmd+Enter (or Ctrl+Enter on non-mac)
+    // sends it to the agent. Same input box, same value — only the
+    // dispatch keystroke differs. `::` legacy escape removed because
+    // there's no longer a `:` prefix to escape.
+    const submitShell = () => {
         const line = value;
-        if (line.length === 0) {
-            return;
-        }
+        if (line.length === 0) return;
         model.recordHistory(line);
         historyIdxRef.current = -1;
         draftRef.current = "";
@@ -1729,26 +1484,29 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
         model.submitInput(line);
     };
 
-    const acceptGhost = () => {
-        if (!ghost) return false;
-        setValue(value + ghost);
-        return true;
+    const submitAgent = () => {
+        const line = value;
+        if (line.length === 0) return;
+        globalStore.set(model.termAgentInput, line);
+        setValue("");
+        historyIdxRef.current = -1;
+        draftRef.current = "";
+        model.submitTermAgentPrompt();
     };
 
-    const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-        if (
-            !e.ctrlKey &&
-            !e.metaKey &&
-            !e.altKey &&
-            !e.shiftKey &&
-            e.key === ":" &&
-            value.length === 0 &&
-            model.canOpenTermAgent()
-        ) {
-            e.preventDefault();
-            model.openTermAgentComposer();
-            return;
-        }
+    // Auto-grow the textarea up to a cap. Resize on every value change
+    // so multi-line agent prompts get visible vertical room without
+    // requiring a manual resize handle. Cap at 8 lines (~160px) before
+    // scrolling — beyond that the input column would dominate the view.
+    React.useEffect(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.style.height = "auto";
+        const max = 160;
+        el.style.height = Math.min(el.scrollHeight, max) + "px";
+    }, [value]);
+
+    const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
         if (e.ctrlKey && e.key.toLowerCase() === "c" && !e.metaKey && !e.shiftKey && !e.altKey) {
             e.preventDefault();
             setValue("");
@@ -1759,23 +1517,26 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
         }
         if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
-            submit();
-            return;
-        }
-        if (e.key === "Tab" && !e.shiftKey) {
-            e.preventDefault();
-            acceptGhost();
-            return;
-        }
-        if (e.key === "ArrowRight" && inputRef.current != null) {
-            const el = inputRef.current;
-            if (el.selectionStart === value.length && el.selectionEnd === value.length && ghost) {
-                e.preventDefault();
-                acceptGhost();
-                return;
+            // Cmd+Enter (mac) or Ctrl+Enter (cross-platform) → agent.
+            // Plain Enter → shell. Shift+Enter falls through to the
+            // textarea's native handler so the user can compose
+            // multi-line prompts (especially useful for the agent).
+            if (e.metaKey || e.ctrlKey) {
+                submitAgent();
+            } else {
+                submitShell();
             }
+            return;
         }
         if (e.key === "ArrowUp") {
+            // Only navigate history when the caret is on the FIRST
+            // line — otherwise let the textarea move the caret up
+            // within the current prompt.
+            const el = inputRef.current;
+            if (el) {
+                const before = value.slice(0, el.selectionStart ?? 0);
+                if (before.includes("\n")) return;
+            }
             if (history.length === 0) return;
             e.preventDefault();
             if (historyIdxRef.current === -1) {
@@ -1787,6 +1548,13 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
             return;
         }
         if (e.key === "ArrowDown") {
+            // Mirror ArrowUp: only navigate history when the caret is
+            // on the LAST line.
+            const el = inputRef.current;
+            if (el) {
+                const after = value.slice(el.selectionStart ?? 0);
+                if (after.includes("\n")) return;
+            }
             if (history.length === 0 || historyIdxRef.current === -1) return;
             e.preventDefault();
             const next = historyIdxRef.current + 1;
@@ -1802,26 +1570,20 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
         }
     };
 
-    const tokens = React.useMemo(() => tokenizeShell(value), [value]);
-
+    // Permissions v2: dropped the per-input ask/plan/do chip. The
+    // posture pill above the input is the only mode-like affordance
+    // now, and it shows posture (per-chat strictness), not mode.
     return (
         <div className="termblocks-input-row">
             <div className="termblocks-input-wrap">
-                <div className="termblocks-input-highlight" aria-hidden>
-                    {tokens.map((t, idx) => (
-                        <span key={idx} className={`tok-${t.kind}`}>
-                            {t.text}
-                        </span>
-                    ))}
-                    {ghost && <span className="tok-ghost">{ghost}</span>}
-                </div>
-                <input
+                <textarea
                     ref={inputRef}
                     className="termblocks-input"
-                    type="text"
+                    rows={1}
                     value={value}
                     spellCheck={false}
                     autoComplete="off"
+                    placeholder="Enter to run · ⌘+Enter to ask · ⇧+Enter for newline"
                     onChange={(e) => {
                         setValue(e.target.value);
                         historyIdxRef.current = -1;
@@ -1833,6 +1595,551 @@ const TermBlocksInput: React.FC<{ model: TermBlocksViewModel }> = ({ model }) =>
     );
 };
 TermBlocksInput.displayName = "TermBlocksInput";
+
+// extractFriendlyError tries to pull the human-readable bit out of a
+// raw provider/error string. Many backends throw the full JSON body
+// at us — e.g. OpenRouter rate-limit returns
+// `API returned status 429: {"error":{"message":"Rate limit ..."}}`.
+// Showing the whole blob in the UI is noisy; if we can find an
+// `error.message` field we use that instead, falling back to the
+// original string when parsing fails.
+function extractFriendlyError(raw: string): string {
+    const braceStart = raw.indexOf("{");
+    if (braceStart < 0) return raw;
+    try {
+        const parsed = JSON.parse(raw.slice(braceStart));
+        const inner = parsed?.error?.message ?? parsed?.message;
+        if (typeof inner === "string" && inner.length > 0) {
+            // Keep the leading status-prefix ("API returned status 429: ")
+            // because it's actionable signal.
+            const prefix = raw.slice(0, braceStart).trim();
+            return prefix ? `${prefix} ${inner}` : inner;
+        }
+    } catch {
+        // Not JSON — fall through to the raw string.
+    }
+    return raw;
+}
+
+const TermAgentNoticeBar: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
+    const error = useAtomValue(model.termAgentNotice);
+    if (!error) return null;
+    const isInfo = error.startsWith("Model switched to:");
+    const display = isInfo ? error : extractFriendlyError(error);
+    return (
+        <div
+            className={cn(
+                "mx-3 my-1 rounded border px-2 py-1 text-xs break-words max-h-24 overflow-y-auto",
+                isInfo
+                    ? "border-zinc-700 text-zinc-400"
+                    : "border-red-500/40 bg-red-500/5 text-red-300"
+            )}
+        >
+            <div className="flex items-start gap-2">
+                <div className="flex-1">{display}</div>
+                <button
+                    type="button"
+                    onClick={() => model.setTermAgentNotice(null)}
+                    className="shrink-0 text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer"
+                    title="Dismiss"
+                >
+                    ✕
+                </button>
+            </div>
+        </div>
+    );
+};
+
+// Posture cycle for the agent footer. Mirrors the term-agent.tsx
+// overlay version. Order matches Claude Code's Shift+Tab convention
+// (default → acceptEdits → bypass → default); "bench" is API-only and
+// not in the cycle.
+const TERMBLOCKS_POSTURE_CYCLE = ["default", "acceptEdits", "bypass"] as const;
+function termblocksPostureLabel(p: string): string {
+    switch (p) {
+        case "default":
+            return "Ask permissions";
+        case "acceptEdits":
+            return "Accept edits";
+        case "bypass":
+            return "Bypass permissions";
+        default:
+            return p;
+    }
+}
+// Pill-style classes for the posture button — border + tinted bg per
+// posture so it's visually consistent with the model pill while still
+// communicating the "asking / accepting / bypass" gradient via color.
+// All three share the same shape so the eye reads a row of pills, not
+// a label-then-pill.
+function termblocksPostureClass(p: string): string {
+    switch (p) {
+        case "default":
+            return "border-zinc-700 bg-zinc-900/40 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-600";
+        case "acceptEdits":
+            return "border-sky-500/40 bg-sky-500/10 text-sky-300 hover:bg-sky-500/20 hover:border-sky-500/60";
+        case "bypass":
+            return "border-amber-500/40 bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 hover:border-amber-500/60";
+        default:
+            return "border-zinc-700 bg-zinc-900/40 text-zinc-500";
+    }
+}
+
+// TermAgentModelPicker is the footer-anchored model switcher. Pops up
+// above the footer (so it doesn't collide with the input) and lets the
+// user search the provider's model list and pick one without leaving
+// the chat. Selection writes to termAgentModelOverrideAtom — same
+// state path as the `model xxx` shell command.
+const TermAgentModelPicker = React.memo(({
+    model,
+    currentModelId,
+    onClose,
+}: {
+    model: TermBlocksViewModel;
+    currentModelId: string;
+    onClose: () => void;
+}) => {
+    const settings = useAtomValue(atoms.settingsAtom);
+    const [filter, setFilter] = React.useState("");
+    const [models, setModels] = React.useState<ProviderModelInfo[]>([]);
+    const [loading, setLoading] = React.useState(false);
+    const [error, setError] = React.useState<string | null>(null);
+    const [activeIdx, setActiveIdx] = React.useState(-1);
+    const wrapRef = React.useRef<HTMLDivElement | null>(null);
+    const listRef = React.useRef<HTMLDivElement | null>(null);
+
+    React.useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const apiType = (settings as any)?.["ai:apitype"] ?? "";
+                const baseUrl = (settings as any)?.["ai:baseurl"] ?? "";
+                const tokenSecretName = (settings as any)?.["ai:apitokensecretname"] ?? "";
+                let apiToken = (settings as any)?.["ai:apitoken"] ?? "";
+                if (!apiToken && tokenSecretName) {
+                    try {
+                        const secrets = await RpcApi.GetSecretsCommand(TabRpcClient, [tokenSecretName]);
+                        apiToken = secrets?.[tokenSecretName] ?? "";
+                    } catch {
+                        // keep apiToken empty; some providers (e.g. OpenRouter) accept anonymous /models
+                    }
+                }
+                const result = await RpcApi.ListProviderModelsCommand(TabRpcClient, {
+                    apitype: apiType,
+                    baseurl: baseUrl,
+                    apitoken: apiToken,
+                });
+                if (!cancelled) setModels(result.models ?? []);
+            } catch (e: any) {
+                if (!cancelled) {
+                    setError(e?.message ?? "failed to fetch models");
+                    setModels([]);
+                }
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => {
+            cancelled = true;
+        };
+    }, [settings]);
+
+    // Same tier ranking as the AI Provider settings combobox so the
+    // two pickers feel identical when both open on the same provider.
+    const filtered = React.useMemo(() => {
+        if (!filter) return models;
+        const q = filter.toLowerCase();
+        const scored: { m: ProviderModelInfo; tier: number; idx: number }[] = [];
+        models.forEach((m, idx) => {
+            const id = m.id.toLowerCase();
+            const name = (m.name ?? "").toLowerCase();
+            const desc = (m.description ?? "").toLowerCase();
+            let tier = Infinity;
+            if (id === q) tier = 0;
+            else if (id.startsWith(q)) tier = 1;
+            else if (id.includes(q)) tier = 2;
+            else if (name.startsWith(q)) tier = 3;
+            else if (name.includes(q)) tier = 4;
+            else if (desc.includes(q)) tier = 5;
+            if (tier !== Infinity) scored.push({ m, tier, idx });
+        });
+        scored.sort((a, b) => a.tier - b.tier || a.idx - b.idx);
+        return scored.map((s) => s.m);
+    }, [filter, models]);
+
+    React.useEffect(() => {
+        // Pre-select the current model on first paint so Enter
+        // re-affirms the existing choice instead of jumping to top.
+        setActiveIdx(filtered.findIndex((m) => m.id === currentModelId));
+    }, [models, currentModelId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    React.useEffect(() => {
+        if (activeIdx < 0) return;
+        const el = listRef.current?.querySelector<HTMLElement>(`[data-mp-idx="${activeIdx}"]`);
+        if (el) el.scrollIntoView({ block: "nearest" });
+    }, [activeIdx]);
+
+    React.useEffect(() => {
+        const onDocMouseDown = (e: MouseEvent) => {
+            const wrap = wrapRef.current;
+            if (wrap && !wrap.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        document.addEventListener("mousedown", onDocMouseDown, true);
+        return () => document.removeEventListener("mousedown", onDocMouseDown, true);
+    }, [onClose]);
+
+    const pick = (id: string) => {
+        globalStore.set(model.termAgentModelOverrideAtom, id);
+        // New chatId per provider/model switch — same as the legacy
+        // `model xxx` shell command. Forces a fresh conversation with
+        // the new model so context isn't mid-thought across families.
+        globalStore.set(model.termAgentChatId, crypto.randomUUID());
+        onClose();
+    };
+
+    const onKey = (e: React.KeyboardEvent<HTMLInputElement>) => {
+        if (e.key === "ArrowDown") {
+            e.preventDefault();
+            setActiveIdx((i) => Math.min(filtered.length - 1, i + 1));
+        } else if (e.key === "ArrowUp") {
+            e.preventDefault();
+            setActiveIdx((i) => Math.max(0, i - 1));
+        } else if (e.key === "Enter") {
+            if (activeIdx >= 0 && filtered[activeIdx]) {
+                e.preventDefault();
+                pick(filtered[activeIdx].id);
+            } else {
+                onClose();
+            }
+        } else if (e.key === "Escape") {
+            e.preventDefault();
+            onClose();
+        }
+    };
+
+    return (
+        <div
+            ref={wrapRef}
+            className="absolute bottom-full right-0 mb-1 w-[360px] max-w-[calc(100vw-2rem)] max-h-72 z-20 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl flex flex-col text-[12px]"
+        >
+            <input
+                type="text"
+                autoFocus
+                placeholder="Search models…"
+                value={filter}
+                onChange={(e) => {
+                    setFilter(e.target.value);
+                    setActiveIdx(-1);
+                }}
+                onKeyDown={onKey}
+                className="px-3 py-2 bg-transparent border-b border-zinc-800 text-zinc-200 focus:outline-none"
+                spellCheck={false}
+                autoComplete="off"
+            />
+            <div ref={listRef} className="flex-1 overflow-y-auto">
+                {loading && (
+                    <div className="px-3 py-3 text-zinc-400 flex items-center gap-2">
+                        <i className="fa-sharp fa-solid fa-spinner fa-spin text-xs" />
+                        Loading models…
+                    </div>
+                )}
+                {error && !loading && <div className="px-3 py-3 text-red-400">{error}</div>}
+                {!loading && !error && filtered.length === 0 && (
+                    <div className="px-3 py-3 text-zinc-500">
+                        {models.length === 0 ? "No models returned." : "No matches."}
+                    </div>
+                )}
+                {!loading &&
+                    filtered.map((m, idx) => (
+                        <button
+                            key={m.id}
+                            type="button"
+                            data-mp-idx={idx}
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => pick(m.id)}
+                            onMouseEnter={() => setActiveIdx(idx)}
+                            className={cn(
+                                "w-full text-left px-3 py-2 cursor-pointer border-b border-zinc-800 last:border-b-0 transition-colors",
+                                idx === activeIdx ? "bg-zinc-800" : "hover:bg-zinc-800/60",
+                                m.id === currentModelId && "ring-1 ring-inset ring-[var(--color-accent)]/40"
+                            )}
+                        >
+                            <div className="font-mono text-[11px] text-zinc-200 truncate">{m.id}</div>
+                            {(m.name || m.context > 0) && (
+                                <div className="text-[10px] text-zinc-500 mt-0.5 flex items-center gap-2">
+                                    {m.name && <span className="truncate">{m.name}</span>}
+                                    {m.context > 0 && (
+                                        <span className="ml-auto whitespace-nowrap">
+                                            {Math.round(m.context / 1000)}K ctx
+                                        </span>
+                                    )}
+                                </div>
+                            )}
+                        </button>
+                    ))}
+            </div>
+        </div>
+    );
+});
+TermAgentModelPicker.displayName = "TermAgentModelPicker";
+
+// TermAgentPostureMenu pops up over the posture pill and lists all
+// permission modes. Clicking a row sets that posture; number keys 1/2/3
+// select directly while the menu is open. Mirrors the reference
+// design in the user-facing docs (Mode header + numeric shortcuts).
+const TermAgentPostureMenu = React.memo(({
+    model,
+    currentPosture,
+    onClose,
+}: {
+    model: TermBlocksViewModel;
+    currentPosture: string;
+    onClose: () => void;
+}) => {
+    const wrapRef = React.useRef<HTMLDivElement | null>(null);
+
+    const pick = (p: string) => {
+        globalStore.set(model.termAgentPosture, p);
+        onClose();
+    };
+
+    React.useEffect(() => {
+        const onDocMouseDown = (e: MouseEvent) => {
+            const wrap = wrapRef.current;
+            if (wrap && !wrap.contains(e.target as Node)) {
+                onClose();
+            }
+        };
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape") {
+                e.preventDefault();
+                onClose();
+                return;
+            }
+            // Number keys 1/2/3 select directly. The menu is the only
+            // visible affordance while open, so it's safe to claim
+            // these keys without colliding with text input.
+            const idx = TERMBLOCKS_POSTURE_CYCLE.findIndex((_, i) => String(i + 1) === e.key);
+            if (idx >= 0) {
+                e.preventDefault();
+                pick(TERMBLOCKS_POSTURE_CYCLE[idx]);
+            }
+        };
+        document.addEventListener("mousedown", onDocMouseDown, true);
+        document.addEventListener("keydown", onKey);
+        return () => {
+            document.removeEventListener("mousedown", onDocMouseDown, true);
+            document.removeEventListener("keydown", onKey);
+        };
+    }, [onClose]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    return (
+        <div
+            ref={wrapRef}
+            className="absolute bottom-full left-0 mb-1 w-[240px] z-20 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl py-1 text-[12px]"
+        >
+            <div className="px-3 py-1.5 text-[11px] text-zinc-500 border-b border-zinc-800 mb-1">Mode</div>
+            {TERMBLOCKS_POSTURE_CYCLE.map((p, idx) => {
+                const isCurrent = p === currentPosture;
+                return (
+                    <button
+                        key={p}
+                        type="button"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => pick(p)}
+                        className={cn(
+                            "w-full flex items-center px-3 py-1.5 text-zinc-200 hover:bg-zinc-800 transition-colors cursor-pointer",
+                            isCurrent && "text-zinc-100"
+                        )}
+                    >
+                        <span className="flex-1 text-left">{termblocksPostureLabel(p)}</span>
+                        {isCurrent && <i className="fa-sharp fa-solid fa-check text-[10px] text-zinc-400 mr-2" />}
+                        <span className="text-[10px] text-zinc-500 tabular-nums">{idx + 1}</span>
+                    </button>
+                );
+            })}
+        </div>
+    );
+});
+TermAgentPostureMenu.displayName = "TermAgentPostureMenu";
+
+// TermAgentFooter is the bottom info strip — a place for ambient
+// agent state that the user wants to glance at, not interact with
+// often. Today it shows posture + active model name; future agent
+// info (token usage, step count, active rule preset, etc.) can join
+// the same row separated by `·`. Posture and model name are both
+// click-interactive (popover menus).
+const TermAgentFooter: React.FC<{ model: TermBlocksViewModel }> = ({ model }) => {
+    const posture = useAtomValue(model.termAgentPosture);
+    const settingsModel = useAtomValue(getSettingsKeyAtom("ai:model"));
+    const override = useAtomValue(model.termAgentModelOverrideAtom);
+    const chatStatus = useAtomValue(model.termAgentChatStatusAtom);
+    const modelName = (override || (settingsModel as string) || "default") as string;
+    const [pickerOpen, setPickerOpen] = React.useState(false);
+    const [postureMenuOpen, setPostureMenuOpen] = React.useState(false);
+    const isActive = chatStatus === "streaming" || chatStatus === "submitted";
+    const stopAgent = () => {
+        model.termAgentStop?.();
+    };
+    // Esc anywhere stops a running agent — the natural "get me out"
+    // shortcut. Only bind while active so we don't intercept Esc
+    // for other modal closers (model picker has its own Esc handling).
+    React.useEffect(() => {
+        if (!isActive) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === "Escape" && !pickerOpen) {
+                stopAgent();
+            }
+        };
+        window.addEventListener("keydown", onKey);
+        return () => window.removeEventListener("keydown", onKey);
+    }, [isActive, pickerOpen]); // eslint-disable-line react-hooks/exhaustive-deps
+    return (
+        <div className="px-3 py-1.5 text-[11px] text-zinc-600 flex items-center gap-2 relative">
+            <div className="relative">
+                <button
+                    type="button"
+                    onClick={() => setPostureMenuOpen((v) => !v)}
+                    title="Permission mode — click to choose"
+                    className={cn(
+                        "px-2.5 py-1 rounded-md border text-[11px] transition-colors cursor-pointer focus:outline-none",
+                        termblocksPostureClass(posture)
+                    )}
+                >
+                    {termblocksPostureLabel(posture)}
+                </button>
+                {postureMenuOpen && (
+                    <TermAgentPostureMenu
+                        model={model}
+                        currentPosture={posture}
+                        onClose={() => setPostureMenuOpen(false)}
+                    />
+                )}
+            </div>
+            {isActive && (
+                <button
+                    type="button"
+                    onClick={stopAgent}
+                    title="Stop the agent (Esc)"
+                    className="px-2 py-0.5 rounded text-[11px] bg-red-500/15 hover:bg-red-500/25 text-red-300 border border-red-500/30 transition-colors cursor-pointer flex items-center gap-1 focus:outline-none"
+                >
+                    <i className="fa-sharp fa-solid fa-stop text-[9px]" />
+                    Stop
+                </button>
+            )}
+            {/* Right cluster: context / model / attach — same order as
+                the reference design. Posture stays on the left as the
+                only non-input ambient state. */}
+            <div className="ml-auto flex items-center gap-2">
+                {/* Context-remaining indicator placeholder. Wires to
+                    data-usage SSE event later — static ring for now. */}
+                <div
+                    title="Context remaining (coming soon)"
+                    className="w-4 h-4 rounded-full border border-zinc-700"
+                />
+                <div className="relative">
+                    <button
+                        type="button"
+                        onClick={() => setPickerOpen((v) => !v)}
+                        title="Click to switch model"
+                        className="px-2.5 py-1 rounded-md border border-zinc-700 bg-zinc-900/40 text-zinc-200 hover:bg-zinc-800 hover:border-zinc-600 transition-colors cursor-pointer truncate max-w-[260px] font-mono text-[11px] focus:outline-none"
+                    >
+                        {modelName}
+                    </button>
+                    {pickerOpen && (
+                        <TermAgentModelPicker
+                            model={model}
+                            currentModelId={modelName}
+                            onClose={() => setPickerOpen(false)}
+                        />
+                    )}
+                </div>
+                {/* Attach file placeholder. No file input wired yet. */}
+                <button
+                    type="button"
+                    title="Attach file (coming soon)"
+                    disabled
+                    className="w-6 h-6 rounded-md border border-zinc-700 bg-zinc-900/40 text-zinc-500 flex items-center justify-center disabled:opacity-50 focus:outline-none"
+                >
+                    <i className="fa-sharp fa-solid fa-plus text-[10px]" />
+                </button>
+            </div>
+        </div>
+    );
+};
+
+const InlineAgentUserMsg = React.memo(({ text }: { text: string; mode?: string }) => {
+    // Permissions v2: dropped the per-message mode tag — Mode the
+    // axis is gone (everything runs in "do"); the user's posture
+    // lives on the chat-level pill, not on each message.
+    return (
+        <div className="mx-3 my-2 flex justify-end">
+            <div className="max-w-[min(100%,44rem)] rounded-lg bg-zinc-700/70 px-3 py-2 text-sm text-white">
+                <div className="whitespace-pre-wrap break-words">{text}</div>
+            </div>
+        </div>
+    );
+});
+
+// InlineAgentError renders a mid-run model/network error as part of
+// the conversation timeline. Visually shaped like InlineAgentResponse
+// (same width, same lozenge layout, no "Error" header) — the error
+// IS the assistant's response in this turn; only the tint signals
+// it's a failure mode rather than normal output. Tries to extract
+// the human-readable bit from a JSON-wrapped provider response so
+// "Rate limit exceeded: ..." shows instead of a 200-line blob.
+const InlineAgentError = React.memo(({ text }: { text: string }) => {
+    const display = extractFriendlyError(text);
+    return (
+        <div className="mx-3 my-2 space-y-2 rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2 text-sm text-red-300">
+            <div className="whitespace-pre-wrap break-words">{display}</div>
+        </div>
+    );
+});
+InlineAgentError.displayName = "InlineAgentError";
+InlineAgentUserMsg.displayName = "InlineAgentUserMsg";
+
+// AgentThinkingBubble shows up between submit and the first model chunk.
+// Without this, timeline goes silent for ~1-3s after Cmd+Enter and the
+// user can't tell whether the request was even received. Three-dot
+// pulse mirrors what Claude Code / chat UIs use; intentionally low-key
+// so the eye doesn't stick on it.
+const AgentThinkingBubble = React.memo(() => {
+    return (
+        <div className="mx-3 my-2 flex items-center gap-2 text-zinc-500">
+            <span className="inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" style={{ animationDelay: "0ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" style={{ animationDelay: "150ms" }} />
+                <span className="w-1.5 h-1.5 rounded-full bg-zinc-500 animate-pulse" style={{ animationDelay: "300ms" }} />
+            </span>
+            <span className="text-xs">Thinking…</span>
+        </div>
+    );
+});
+AgentThinkingBubble.displayName = "AgentThinkingBubble";
+
+const InlineAgentResponse = React.memo(({ message, streaming }: { message: WaveUIMessage; streaming: boolean }) => {
+    const visibleParts = (message.parts ?? []).filter(
+        (part) => part.type === "text" || part.type === "reasoning" || part.type === "data-tooluse" || part.type === "data-toolprogress"
+    );
+    if (visibleParts.length === 0 && streaming) {
+        return (
+            <div className="mx-3 my-2 rounded-lg px-3 py-2 text-sm text-zinc-400">Thinking...</div>
+        );
+    }
+    return (
+        <div className="mx-3 my-2 space-y-2 rounded-lg border border-zinc-800/50 bg-zinc-900/30 px-3 py-2">
+            {visibleParts.map((part, idx) => (
+                <TermAgentMessagePartView key={`${part.type}:${idx}`} part={part} isStreaming={streaming} />
+            ))}
+        </div>
+    );
+});
+InlineAgentResponse.displayName = "InlineAgentResponse";
 
 export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> = ({ model }) => {
     const blocks = useAtomValue(model.blocksAtom);
@@ -1848,36 +2155,42 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
     const themeName = useAtomValue(model.termThemeNameAtom);
     const transparency = useAtomValue(model.termTransparencyAtom);
     const fontSize = useAtomValue(model.termFontSizeAtom);
-    const agentComposerOpen = useAtomValue(model.termAgentComposerOpenAtom);
-    const agentInput = useAtomValue(model.termAgentInputAtom);
-    const agentErrorText = useAtomValue(model.termAgentErrorAtom);
-    const agentChatId = useAtomValue(model.termAgentChatIdAtom);
-    const agentMessages = useAtomValue(model.termAgentMessagesAtom);
-    const agentMessageTs = useAtomValue(model.termAgentMessageTsAtom);
-    const agentStatus = useAtomValue(model.termAgentStatusAtom);
-    const aiModel = React.useMemo(() => WaveAIModel.getInstance(), []);
-    const currentAIMode = useAtomValue(aiModel.currentAIMode);
-    const defaultAIMode = useAtomValue(aiModel.defaultModeAtom);
     const [termTheme] = React.useMemo(
         () => computeTheme(fullConfig, themeName, transparency),
         [fullConfig, themeName, transparency]
     );
     const scrollRef = React.useRef<HTMLDivElement>(null);
-    const stickToBottomRef = React.useRef(true);
+    // Sticky-scroll: track whether the viewport is currently at the
+    // bottom. When the user scrolls up to read history, this flips to
+    // false and we stop auto-scrolling. When they scroll back to the
+    // bottom, it flips true again and follow-mode resumes. Initial
+    // true so first paint lands at the bottom.
+    const isAtBottomRef = React.useRef(true);
+    const chatStatus = useAtomValue(model.termAgentChatStatusAtom);
 
     React.useEffect(() => {
         const onKey = (e: KeyboardEvent) => {
-            if (e.key === "Escape" && agentComposerOpen) {
-                model.closeTermAgentComposer();
-                return;
-            }
             if (e.key === "Escape" && selectedOid) {
                 model.clearSelection();
             }
         };
         window.addEventListener("keydown", onKey);
         return () => window.removeEventListener("keydown", onKey);
-    }, [agentComposerOpen, model, selectedOid]);
+    }, [model, selectedOid]);
+
+    React.useEffect(() => {
+        const el = scrollRef.current;
+        if (!el) return;
+        const onScroll = () => {
+            // 32px slack — small toolbar/padding shouldn't break the
+            // "at bottom" detection.
+            const threshold = 32;
+            isAtBottomRef.current =
+                el.scrollHeight - el.scrollTop - el.clientHeight <= threshold;
+        };
+        el.addEventListener("scroll", onScroll, { passive: true });
+        return () => el.removeEventListener("scroll", onScroll);
+    }, []);
 
     // Refresh git info the moment the block's cwd changes (cd into a repo,
     // cd out of it).  The 4s poll still covers branch switch / file edits.
@@ -1896,83 +2209,27 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
         () => blocks.filter((b) => b.state !== "prompt" && b.seq > minVisibleSeq && !hiddenOids.has(b.oid)),
         [blocks, minVisibleSeq, hiddenOids]
     );
-    const agentMode = React.useMemo(() => {
-        if (currentAIMode && aiModel.isValidMode(currentAIMode)) {
-            return currentAIMode;
-        }
-        if (defaultAIMode && aiModel.isValidMode(defaultAIMode)) {
-            return defaultAIMode;
-        }
-        return currentAIMode ?? defaultAIMode ?? "";
-    }, [aiModel, currentAIMode, defaultAIMode]);
-    const agentTurns = React.useMemo(
-        () => groupTermBlocksAgentTurns(agentMessages, agentMessageTs),
-        [agentMessages, agentMessageTs]
-    );
-    const latestAgentTurnKey = agentTurns.length > 0 ? agentTurns[agentTurns.length - 1].key : "";
-    const timelineItems = React.useMemo(() => {
-        const items: TermBlocksTimelineItem[] = [
-            ...visibleBlocks.map((block) => ({
-                kind: "cmd" as const,
-                key: block.oid,
-                ts: block.tscmdns ?? block.tspromptns ?? block.createdat,
-                block,
-            })),
-            ...agentTurns.map((turn) => ({
-                kind: "agent" as const,
-                key: turn.key,
-                ts: turn.ts,
-                turn,
-            })),
-        ];
-        items.sort((left, right) => {
-            if (left.ts !== right.ts) {
-                return left.ts - right.ts;
-            }
-            if (left.kind !== right.kind) {
-                return left.kind === "cmd" ? -1 : 1;
-            }
-            return left.key.localeCompare(right.key);
-        });
-        return items;
-    }, [agentTurns, visibleBlocks]);
-    const lastTimelineItem = timelineItems.length > 0 ? timelineItems[timelineItems.length - 1] : null;
-    const lastTimelineKey = agentComposerOpen ? "agent-composer" : (lastTimelineItem?.key ?? "");
-    const lastTimelineMeasure = React.useMemo(() => {
-        if (agentComposerOpen) {
-            return agentInput.length;
-        }
-        if (lastTimelineItem == null) {
-            return 0;
-        }
-        if (lastTimelineItem.kind === "cmd") {
-            return outputs[lastTimelineItem.block.oid]?.length ?? 0;
-        }
-        return getTermBlocksAgentTurnMeasure(lastTimelineItem.turn);
-    }, [agentComposerOpen, agentInput.length, lastTimelineItem, outputs]);
+    const timeline = useAtomValue(model.timelineAtom);
+    const lastOid = visibleBlocks.length > 0 ? visibleBlocks[visibleBlocks.length - 1].oid : "";
+    const lastOutputLen = lastOid && outputs[lastOid] != null ? outputs[lastOid].length : 0;
     const inAltScreen = altOID !== "";
     const runningBlock = React.useMemo(() => blocks.find((b) => b.state === "running") ?? null, [blocks]);
 
-    React.useEffect(() => {
-        const el = scrollRef.current;
-        if (el == null) {
-            return;
-        }
-        const updateStickiness = () => {
-            stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
-        };
-        updateStickiness();
-        el.addEventListener("scroll", updateStickiness);
-        return () => el.removeEventListener("scroll", updateStickiness);
-    }, []);
-
-    // Follow streaming updates only while the user is already near the bottom.
+    // Scroll to the bottom whenever the last visible block changes OR
+    // its output bytes arrive — but only when the user is already
+    // parked at the bottom. If they scrolled up to read earlier
+    // history, leave their viewport alone. xterm lays out across a
+    // couple of frames, so we trigger deferred scrolls in addition to
+    // the immediate one.
     React.useEffect(() => {
         if (inAltScreen) {
             return;
         }
+        if (!isAtBottomRef.current) {
+            return;
+        }
         const el = scrollRef.current;
-        if (el == null || !stickToBottomRef.current) return;
+        if (el == null) return;
         const toBottom = () => {
             el.scrollTop = el.scrollHeight;
         };
@@ -1985,22 +2242,19 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
             cancelAnimationFrame(raf2);
             clearTimeout(late);
         };
-    }, [
-        lastTimelineKey,
-        lastTimelineMeasure,
-        timelineItems.length,
-        agentComposerOpen,
-        agentInput.length,
-        agentStatus,
-        inAltScreen,
-    ]);
+        // `timeline` (not just .length) so streaming text-deltas — which
+        // mutate parts inside an existing entry without changing array
+        // length — still fire the auto-scroll. Re-rendering at every
+        // sync is fine: the work below is just two scrollTop sets when
+        // already at bottom, otherwise an early return.
+    }, [lastOid, lastOutputLen, visibleBlocks.length, inAltScreen, timeline, chatStatus]);
 
     // Alt-screen mode: a TUI (less/vim/top/…) took over the PTY, so we show
     // the running block's buffer in a single full-viewport xterm with stdin
     // enabled.  Keystrokes go straight to the PTY via onData.
     if (inAltScreen) {
         const running = blocks.find((b) => b.state === "running") ?? blocks[blocks.length - 1];
-        const bytes = running != null ? (outputs[running.oid] ?? new Uint8Array()) : new Uint8Array();
+        const bytes = running != null ? outputs[running.oid] ?? new Uint8Array() : new Uint8Array();
         console.log("[cd-bug] TermBlocksView render alt-screen", {
             blockId: model.blockId,
             altOID,
@@ -2011,7 +2265,6 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
         });
         return (
             <div className="termblocks-root">
-                <TermBlocksAgentSessionBridge key={agentChatId} model={model} />
                 <div className="termblocks-altscreen-wrap">
                     <AltScreenXterm
                         bytes={bytes}
@@ -2025,9 +2278,24 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
         );
     }
 
+    // Subscribe reactively — termAgentChatId is reset on
+    // clearTermAgentSession() and on the start of a new prompt, so a
+    // non-reactive read would freeze the context against the previous
+    // chat and stamp persisted "remember this" rules with a stale id.
+    const approvalChatId = useAtomValue(model.termAgentChatId);
+    const approvalCtx = React.useMemo(
+        () => ({
+            chatId: approvalChatId,
+            getCwd: () => blockMetaCwd ?? undefined,
+            tabId: model.tabModel.tabId,
+            anchorBlockId: model.blockId,
+        }),
+        [model, blockMetaCwd, approvalChatId]
+    );
+
     return (
+        <TermAgentApprovalContext.Provider value={approvalCtx}>
         <div className="termblocks-root">
-            <TermBlocksAgentSessionBridge key={agentChatId} model={model} />
             <div
                 className="termblocks-scroll"
                 ref={scrollRef}
@@ -2038,10 +2306,10 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                 }}
             >
                 {error && <div className="termblocks-empty termblocks-error">Error: {error}</div>}
-                {!error && loading && timelineItems.length === 0 && !agentComposerOpen && (
+                {!error && loading && visibleBlocks.length === 0 && (
                     <div className="termblocks-empty">Loading…</div>
                 )}
-                {(timelineItems.length > 0 || agentComposerOpen) && (
+                {timeline.length > 0 && (
                     <div
                         className="termblocks-container"
                         onClick={(e) => {
@@ -2050,48 +2318,63 @@ export const TermBlocksView: React.FC<ViewComponentProps<TermBlocksViewModel>> =
                             }
                         }}
                     >
-                        {timelineItems.map((item) => {
-                            if (item.kind === "cmd") {
-                                const cb = item.block;
+                        {timeline.map((entry) => {
+                            if (entry.type === "cmd") {
                                 return (
                                     <TermBlockRow
-                                        key={cb.oid}
-                                        block={cb}
-                                        output={outputs[cb.oid]}
+                                        key={entry.block.oid}
+                                        block={entry.block}
+                                        output={outputs[entry.block.oid]}
                                         model={model}
                                         fallbackCwd={blockMetaCwd}
                                         home={home}
                                         gitInfo={gitInfo}
-                                        selected={cb.oid === selectedOid}
+                                        selected={entry.block.oid === selectedOid}
                                         theme={termTheme}
                                         fontSize={fontSize}
                                     />
                                 );
                             }
-                            const isStreaming =
-                                (agentStatus === "streaming" || agentStatus === "submitted") &&
-                                item.turn.key === latestAgentTurnKey;
-                            return (
-                                <TermBlocksAgentTurnCard
-                                    key={item.turn.key}
-                                    turn={item.turn}
-                                    mode={agentMode}
-                                    isStreaming={isStreaming}
-                                    errorText={item.turn.key === latestAgentTurnKey ? agentErrorText : null}
-                                />
-                            );
+                            if (entry.type === "agent-user") {
+                                return (
+                                    <InlineAgentUserMsg
+                                        key={entry.id}
+                                        text={entry.text}
+                                        mode={entry.mode}
+                                    />
+                                );
+                            }
+                            if (entry.type === "agent-response") {
+                                return (
+                                    <InlineAgentResponse
+                                        key={entry.message.id}
+                                        message={entry.message}
+                                        streaming={entry.streaming}
+                                    />
+                                );
+                            }
+                            if (entry.type === "agent-error") {
+                                return <InlineAgentError key={entry.id} text={entry.text} />;
+                            }
+                            return null;
                         })}
-                        {agentComposerOpen && (
-                            <TermBlocksAgentComposerCard model={model} mode={agentMode} errorText={agentErrorText} />
-                        )}
+                        {chatStatus === "submitted" &&
+                            timeline.length > 0 &&
+                            timeline[timeline.length - 1].type === "agent-user" && (
+                                <AgentThinkingBubble />
+                            )}
                     </div>
                 )}
             </div>
             <div className="termblocks-input-card">
                 <TermBlocksStatusBar cwd={blockMetaCwd} home={home} gitInfo={gitInfo} blockId={model.blockId} />
-                {runningBlock == null && !agentComposerOpen && <TermBlocksInput model={model} />}
+                <TermAgentNoticeBar model={model} />
+                {runningBlock == null && <TermBlocksInput model={model} />}
+                <TermAgentFooter model={model} />
             </div>
+            <TermAgentChatProvider model={model} />
         </div>
+        </TermAgentApprovalContext.Provider>
     );
 };
 TermBlocksView.displayName = "TermBlocksView";
@@ -2122,10 +2405,8 @@ const ChipPopover: React.FC<{
         const handler = (e: MouseEvent) => {
             const target = e.target as Node;
             if (
-                dropdownRef.current &&
-                !dropdownRef.current.contains(target) &&
-                triggerRef.current &&
-                !triggerRef.current.contains(target)
+                dropdownRef.current && !dropdownRef.current.contains(target) &&
+                triggerRef.current && !triggerRef.current.contains(target)
             ) {
                 setOpen(false);
             }
@@ -2136,27 +2417,23 @@ const ChipPopover: React.FC<{
 
     const dropdownStyle: React.CSSProperties = rect
         ? {
-              position: "fixed",
-              left: rect.left,
-              bottom: window.innerHeight - rect.top + 6,
-              zIndex: 99999,
-              minWidth: Math.max(rect.width, 220),
-          }
+            position: "fixed",
+            left: rect.left,
+            bottom: window.innerHeight - rect.top + 6,
+            zIndex: 99999,
+            minWidth: Math.max(rect.width, 220),
+        }
         : { display: "none" };
 
     return (
         <>
-            <span ref={triggerRef} onClick={toggle}>
-                {trigger}
-            </span>
-            {open &&
-                rect &&
-                ReactDOM.createPortal(
-                    <div ref={dropdownRef} style={dropdownStyle}>
-                        {children(() => setOpen(false))}
-                    </div>,
-                    document.body
-                )}
+            <span ref={triggerRef} onClick={toggle}>{trigger}</span>
+            {open && rect && ReactDOM.createPortal(
+                <div ref={dropdownRef} style={dropdownStyle}>
+                    {children(() => setOpen(false))}
+                </div>,
+                document.body
+            )}
         </>
     );
 };
@@ -2184,9 +2461,7 @@ const CwdPickerContent: React.FC<{ cwd: string; blockId: string; close: () => vo
             setEntries(list);
         };
         load().catch(() => {});
-        return () => {
-            cancelled = true;
-        };
+        return () => { cancelled = true; };
     }, [cwd]);
 
     const navigate = (path: string) => {
@@ -2200,13 +2475,10 @@ const CwdPickerContent: React.FC<{ cwd: string; blockId: string; close: () => vo
         return s ? entries.filter((e) => (e.name ?? "").toLowerCase().includes(s)) : entries;
     }, [entries, search]);
 
-    const rows = React.useMemo(
-        () => [
-            ...(search ? [] : [{ path: cwd + "/..", label: ".. (Parent Directory)", icon: "fa-solid fa-arrow-up" }]),
-            ...filtered.map((e) => ({ path: e.path, label: e.name ?? e.path, icon: "fa-regular fa-folder" })),
-        ],
-        [cwd, search, filtered]
-    );
+    const rows = React.useMemo(() => [
+        ...(search ? [] : [{ path: cwd + "/..", label: ".. (Parent Directory)", icon: "fa-solid fa-arrow-up" }]),
+        ...filtered.map((e) => ({ path: e.path, label: e.name ?? e.path, icon: "fa-regular fa-folder" })),
+    ], [cwd, search, filtered]);
 
     const clampFocus = (n: number) => Math.max(0, Math.min(n, rows.length - 1));
 
@@ -2217,22 +2489,13 @@ const CwdPickerContent: React.FC<{ cwd: string; blockId: string; close: () => vo
                 <input
                     ref={searchRef}
                     value={search}
-                    onChange={(e) => {
-                        setSearch(e.target.value);
-                        setFocused(0);
-                    }}
+                    onChange={(e) => { setSearch(e.target.value); setFocused(0); }}
                     placeholder="Search directories..."
                     spellCheck={false}
                     className="tb-chip-dropdown-input"
                     onKeyDown={(e) => {
-                        if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setFocused((f) => clampFocus(f + 1));
-                        }
-                        if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setFocused((f) => clampFocus(f - 1));
-                        }
+                        if (e.key === "ArrowDown") { e.preventDefault(); setFocused((f) => clampFocus(f + 1)); }
+                        if (e.key === "ArrowUp") { e.preventDefault(); setFocused((f) => clampFocus(f - 1)); }
                         if (e.key === "Enter" && rows[focused]) navigate(rows[focused].path);
                         if (e.key === "Escape") close();
                     }}
@@ -2258,10 +2521,7 @@ CwdPickerContent.displayName = "CwdPickerContent";
 
 // ---- git branch picker ----
 const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockId: string; close: () => void }> = ({
-    cwd,
-    currentBranch,
-    blockId,
-    close,
+    cwd, currentBranch, blockId, close,
 }) => {
     const [branches, setBranches] = React.useState<string[]>([]);
     const [focused, setFocused] = React.useState(0);
@@ -2278,10 +2538,7 @@ const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockI
                 cwd,
             });
             if (cancelled) return;
-            const list = res.stdout
-                .split("\n")
-                .map((s) => s.trim())
-                .filter(Boolean);
+            const list = res.stdout.split("\n").map((s) => s.trim()).filter(Boolean);
             list.sort((a, b) => {
                 if (a === currentBranch) return -1;
                 if (b === currentBranch) return 1;
@@ -2290,9 +2547,7 @@ const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockI
             setBranches(list);
         };
         load().catch(() => {});
-        return () => {
-            cancelled = true;
-        };
+        return () => { cancelled = true; };
     }, [cwd, currentBranch]);
 
     const filtered = search ? branches.filter((b) => b.toLowerCase().includes(search.toLowerCase())) : branches;
@@ -2311,22 +2566,13 @@ const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockI
                 <input
                     ref={searchRef}
                     value={search}
-                    onChange={(e) => {
-                        setSearch(e.target.value);
-                        setFocused(0);
-                    }}
+                    onChange={(e) => { setSearch(e.target.value); setFocused(0); }}
                     placeholder="Search branches..."
                     spellCheck={false}
                     className="tb-chip-dropdown-input"
                     onKeyDown={(e) => {
-                        if (e.key === "ArrowDown") {
-                            e.preventDefault();
-                            setFocused((f) => clamp(f + 1));
-                        }
-                        if (e.key === "ArrowUp") {
-                            e.preventDefault();
-                            setFocused((f) => clamp(f - 1));
-                        }
+                        if (e.key === "ArrowDown") { e.preventDefault(); setFocused((f) => clamp(f + 1)); }
+                        if (e.key === "ArrowUp") { e.preventDefault(); setFocused((f) => clamp(f - 1)); }
                         if (e.key === "Enter" && filtered[focused]) checkout(filtered[focused]);
                         if (e.key === "Escape") close();
                     }}
@@ -2340,11 +2586,10 @@ const BranchPickerContent: React.FC<{ cwd: string; currentBranch: string; blockI
                         onMouseEnter={() => setFocused(i)}
                         onClick={() => checkout(b)}
                     >
-                        {b === currentBranch ? (
-                            <i className="fa-solid fa-check tb-chip-dropdown-row-icon" aria-hidden />
-                        ) : (
-                            <i className="fa-solid fa-code-branch tb-chip-dropdown-row-icon" aria-hidden />
-                        )}
+                        {b === currentBranch
+                            ? <i className="fa-solid fa-check tb-chip-dropdown-row-icon" aria-hidden />
+                            : <i className="fa-solid fa-code-branch tb-chip-dropdown-row-icon" aria-hidden />
+                        }
                         {b}
                     </div>
                 ))}
@@ -2368,33 +2613,31 @@ const TermBlocksStatusBar: React.FC<{
     return (
         <div className="termblocks-statusbar">
             {shortCwd && (
-                <ChipPopover
-                    trigger={
-                        <span className="termblocks-chip termblocks-chip-clickable" title={cwd}>
-                            <FolderIcon size={12} className="termblocks-chip-icon" aria-hidden />
-                            {shortCwd}
-                        </span>
-                    }
-                >
+                <ChipPopover trigger={
+                    <span className="termblocks-chip termblocks-chip-clickable" title={cwd}>
+                        <FolderIcon size={12} className="termblocks-chip-icon" aria-hidden />
+                        {shortCwd}
+                    </span>
+                }>
                     {(close) => <CwdPickerContent cwd={cwd} blockId={blockId} close={close} />}
                 </ChipPopover>
             )}
             {gitInfo?.isrepo && gitInfo.branch && (
-                <ChipPopover
-                    trigger={
-                        <span
-                            className="termblocks-chip termblocks-chip-clickable"
-                            title="git branch — click to switch"
-                        >
-                            <i className="fa-solid fa-code-branch termblocks-chip-icon" aria-hidden />
-                            {gitInfo.branch}
-                            {gitInfo.ahead ? <span className="termblocks-chip-sub">↑{gitInfo.ahead}</span> : null}
-                            {gitInfo.behind ? <span className="termblocks-chip-sub">↓{gitInfo.behind}</span> : null}
-                        </span>
-                    }
-                >
+                <ChipPopover trigger={
+                    <span className="termblocks-chip termblocks-chip-clickable" title="git branch — click to switch">
+                        <i className="fa-solid fa-code-branch termblocks-chip-icon" aria-hidden />
+                        {gitInfo.branch}
+                        {gitInfo.ahead ? <span className="termblocks-chip-sub">↑{gitInfo.ahead}</span> : null}
+                        {gitInfo.behind ? <span className="termblocks-chip-sub">↓{gitInfo.behind}</span> : null}
+                    </span>
+                }>
                     {(close) => (
-                        <BranchPickerContent cwd={cwd} currentBranch={gitInfo.branch} blockId={blockId} close={close} />
+                        <BranchPickerContent
+                            cwd={cwd}
+                            currentBranch={gitInfo.branch}
+                            blockId={blockId}
+                            close={close}
+                        />
                     )}
                 </ChipPopover>
             )}
@@ -2418,98 +2661,3 @@ const TermBlocksStatusBar: React.FC<{
 };
 TermBlocksStatusBar.displayName = "TermBlocksStatusBar";
 
-type ShellToken = { text: string; kind: "cmd" | "flag" | "string" | "var" | "comment" | "op" | "path" | "text" };
-
-// Minimal bash-ish tokenizer for the input line.  Good enough to color
-// the command, flags, quoted strings, variables, comments, and basic
-// shell operators (| && || ; > < >>).  Everything else stays plain.
-function tokenizeShell(input: string): ShellToken[] {
-    const tokens: ShellToken[] = [];
-    let i = 0;
-    let seenFirstWord = false;
-    const isWs = (c: string) => c === " " || c === "\t";
-    const isWordChar = (c: string) =>
-        c !== " " &&
-        c !== "\t" &&
-        c !== '"' &&
-        c !== "'" &&
-        c !== "$" &&
-        c !== "#" &&
-        c !== "|" &&
-        c !== "&" &&
-        c !== ";" &&
-        c !== "<" &&
-        c !== ">" &&
-        c !== "(" &&
-        c !== ")";
-    while (i < input.length) {
-        const c = input[i];
-        if (isWs(c)) {
-            let j = i;
-            while (j < input.length && isWs(input[j])) j++;
-            tokens.push({ text: input.slice(i, j), kind: "text" });
-            i = j;
-            continue;
-        }
-        if (c === "#") {
-            tokens.push({ text: input.slice(i), kind: "comment" });
-            break;
-        }
-        if (c === '"') {
-            let j = i + 1;
-            while (j < input.length && input[j] !== '"') {
-                if (input[j] === "\\" && j + 1 < input.length) j++;
-                j++;
-            }
-            if (j < input.length) j++;
-            tokens.push({ text: input.slice(i, j), kind: "string" });
-            i = j;
-            seenFirstWord = true;
-            continue;
-        }
-        if (c === "'") {
-            let j = i + 1;
-            while (j < input.length && input[j] !== "'") j++;
-            if (j < input.length) j++;
-            tokens.push({ text: input.slice(i, j), kind: "string" });
-            i = j;
-            seenFirstWord = true;
-            continue;
-        }
-        if (c === "$") {
-            let j = i + 1;
-            if (input[j] === "{") {
-                while (j < input.length && input[j] !== "}") j++;
-                if (j < input.length) j++;
-            } else {
-                while (j < input.length && /[A-Za-z0-9_]/.test(input[j])) j++;
-            }
-            tokens.push({ text: input.slice(i, j), kind: "var" });
-            i = j;
-            continue;
-        }
-        if (c === "|" || c === "&" || c === ";" || c === "<" || c === ">" || c === "(" || c === ")") {
-            let j = i + 1;
-            if ((c === "|" || c === "&" || c === ">") && input[j] === c) j++;
-            tokens.push({ text: input.slice(i, j), kind: "op" });
-            i = j;
-            seenFirstWord = false;
-            continue;
-        }
-        let j = i;
-        while (j < input.length && isWordChar(input[j])) j++;
-        const word = input.slice(i, j);
-        if (!seenFirstWord) {
-            tokens.push({ text: word, kind: "cmd" });
-            seenFirstWord = true;
-        } else if (word.startsWith("-")) {
-            tokens.push({ text: word, kind: "flag" });
-        } else if (word.includes("/") || word.startsWith("~") || word.startsWith(".")) {
-            tokens.push({ text: word, kind: "path" });
-        } else {
-            tokens.push({ text: word, kind: "text" });
-        }
-        i = j;
-    }
-    return tokens;
-}

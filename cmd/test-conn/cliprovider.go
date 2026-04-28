@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/userinput"
+	"github.com/s-zx/crest/pkg/userinput"
 )
 
 type CLIProvider struct {

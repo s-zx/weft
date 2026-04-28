@@ -7,11 +7,11 @@ import (
 	"fmt"
 
 	"github.com/spf13/cobra"
-	"github.com/wavetermdev/waveterm/pkg/remote"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wconfig"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc/wshclient"
+	"github.com/s-zx/crest/pkg/remote"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wconfig"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshrpc/wshclient"
 )
 
 var (

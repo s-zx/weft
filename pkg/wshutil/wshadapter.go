@@ -8,9 +8,9 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/panichandler"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/panichandler"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wshrpc"
 )
 
 var WshCommandDeclMap = wshrpc.GenerateWshCommandDeclMap()

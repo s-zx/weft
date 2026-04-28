@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/aiutil"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/chatstore"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/aiusechat/aiutil"
+	"github.com/s-zx/crest/pkg/aiusechat/chatstore"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/utilfn"
 )
 
 // cleanSchemaForGemini removes fields from JSON Schema that Gemini doesn't accept
@@ -421,41 +421,46 @@ func GetFunctionCallInputByToolCallId(aiChat uctypes.AIChat, toolCallId string) 
 
 // UpdateToolUseData updates the tool use data for a specific tool call in the chat
 func UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {
-	chat := chatstore.DefaultChatStore.Get(chatId)
-	if chat == nil {
-		return fmt.Errorf("chat not found: %s", chatId)
-	}
-
-	for _, genMsg := range chat.NativeMessages {
-		chatMsg, ok := genMsg.(*GeminiChatMessage)
+	messageId, found := chatstore.DefaultChatStore.FindMessageIdByPredicate(chatId, func(m uctypes.GenAIMessage) bool {
+		chatMsg, ok := m.(*GeminiChatMessage)
 		if !ok {
-			continue
+			return false
 		}
-
-		for i, part := range chatMsg.Parts {
+		for _, part := range chatMsg.Parts {
 			if part.FunctionCall != nil && part.ToolUseData != nil && part.ToolUseData.ToolCallId == toolCallId {
-				// Update the message with new tool use data
-				updatedMsg := &GeminiChatMessage{
-					MessageId: chatMsg.MessageId,
-					Role:      chatMsg.Role,
-					Parts:     make([]GeminiMessagePart, len(chatMsg.Parts)),
-					Usage:     chatMsg.Usage,
-				}
-				copy(updatedMsg.Parts, chatMsg.Parts)
-				updatedMsg.Parts[i].ToolUseData = &toolUseData
-
-				aiOpts := &uctypes.AIOptsType{
-					APIType:    chat.APIType,
-					Model:      chat.Model,
-					APIVersion: chat.APIVersion,
-				}
-
-				return chatstore.DefaultChatStore.PostMessage(chatId, aiOpts, updatedMsg)
+				return true
 			}
 		}
+		return false
+	})
+	if !found {
+		return fmt.Errorf("tool call with ID %s not found in chat %s", toolCallId, chatId)
 	}
-
-	return fmt.Errorf("tool call with ID %s not found in chat %s", toolCallId, chatId)
+	updated := chatstore.DefaultChatStore.UpdateMessage(chatId, messageId, func(m uctypes.GenAIMessage) uctypes.GenAIMessage {
+		chatMsg, ok := m.(*GeminiChatMessage)
+		if !ok {
+			return nil
+		}
+		for i, part := range chatMsg.Parts {
+			if part.FunctionCall == nil || part.ToolUseData == nil || part.ToolUseData.ToolCallId != toolCallId {
+				continue
+			}
+			updatedMsg := &GeminiChatMessage{
+				MessageId: chatMsg.MessageId,
+				Role:      chatMsg.Role,
+				Parts:     make([]GeminiMessagePart, len(chatMsg.Parts)),
+				Usage:     chatMsg.Usage,
+			}
+			copy(updatedMsg.Parts, chatMsg.Parts)
+			updatedMsg.Parts[i].ToolUseData = &toolUseData
+			return updatedMsg
+		}
+		return nil
+	})
+	if !updated {
+		return fmt.Errorf("tool call with ID %s vanished during update in chat %s", toolCallId, chatId)
+	}
+	return nil
 }
 
 func RemoveToolUseCall(chatId string, toolCallId string) error {

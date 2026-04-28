@@ -248,11 +248,6 @@ const MacOSFirstClickHandler = () => {
                         console.log("macos first-click, focusing block", blockId);
                         refocusNode(blockId);
                     }, 10);
-                } else if (isAIPanelTarget(e.target)) {
-                    setTimeout(() => {
-                        console.log("macos first-click, focusing AI panel");
-                        FocusManager.getInstance().setWaveAIFocused(true);
-                    }, 10);
                 }
                 console.log("macos first-click detected, canceled", timeDiff + "ms");
                 return;

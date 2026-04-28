@@ -104,12 +104,6 @@ const (
 	MetaKey_LayoutFileExplorerVisible        = "layout:fileexplorervisible"
 	MetaKey_LayoutFileExplorerWidth          = "layout:fileexplorerwidth"
 
-	MetaKey_WaveAiPanelOpen                  = "waveai:panelopen"
-	MetaKey_WaveAiPanelWidth                 = "waveai:panelwidth"
-	MetaKey_WaveAiModel                      = "waveai:model"
-	MetaKey_WaveAiChatId                     = "waveai:chatid"
-	MetaKey_WaveAiWidgetContext              = "waveai:widgetcontext"
-
 	MetaKey_TermClear                        = "term:*"
 	MetaKey_TermFontSize                     = "term:fontsize"
 	MetaKey_TermFontFamily                   = "term:fontfamily"

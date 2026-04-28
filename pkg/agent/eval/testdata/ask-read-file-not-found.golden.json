@@ -1,0 +1,28 @@
+{
+  "name": "ask-read-file-not-found",
+  "description": "Agent attempts to read a nonexistent file and gracefully reports the error",
+  "mode": "ask",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "What is in the file missing.txt?",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "read_text_file", "input": {"filename": "{{CWD}}/missing.txt"}}
+          ]
+        },
+        {
+          "text": "The file missing.txt was not found. It does not exist in the current directory."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["read_text_file"],
+    "final_text_contains": ["not found"]
+  }
+}

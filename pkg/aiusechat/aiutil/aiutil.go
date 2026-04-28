@@ -17,10 +17,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/wcore"
-	"github.com/wavetermdev/waveterm/pkg/web/sse"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/wcore"
+	"github.com/s-zx/crest/pkg/web/sse"
 )
 
 // ExtractXmlAttribute extracts an attribute value from an XML-like tag.
@@ -262,7 +262,38 @@ func CreateToolUseData(toolCallID, toolName string, arguments string, chatOpts u
 		toolUseData.ToolDesc = toolDef.ToolCallDesc(parsedArgs, nil, nil)
 	}
 
-	if toolDef.ToolApproval != nil {
+	// Decide approval. ApprovalDecider (set by the agent runtime from
+	// the permissions engine) wins when present; falls back to the
+	// per-tool ToolApproval callback for code paths that don't use
+	// the engine yet (legacy, tests, eval harness wiring).
+	if chatOpts.ApprovalDecider != nil {
+		toolCall := uctypes.WaveToolCall{
+			ID:    toolCallID,
+			Name:  toolName,
+			Input: parsedArgs,
+		}
+		decision := chatOpts.ApprovalDecider(toolCall)
+		switch decision.Behavior {
+		case "allow":
+			toolUseData.Approval = uctypes.ApprovalAutoApproved
+		case "ask":
+			toolUseData.Approval = uctypes.ApprovalNeedsApproval
+			// Suggestions only matter when we're prompting; copying
+			// them on the allow/deny paths would just bloat the SSE
+			// payload.
+			toolUseData.Suggestions = decision.Suggestions
+		case "deny":
+			// Mark the tool-use as pre-failed so processToolCallInternal's
+			// early-return path produces the error result without ever
+			// running the tool. Reason becomes the model-visible error.
+			toolUseData.Status = uctypes.ToolUseStatusError
+			reason := decision.Reason
+			if reason == "" {
+				reason = "tool call denied by permission rule"
+			}
+			toolUseData.ErrorMessage = "denied: " + reason
+		}
+	} else if toolDef.ToolApproval != nil {
 		toolUseData.Approval = toolDef.ToolApproval(parsedArgs)
 	}
 

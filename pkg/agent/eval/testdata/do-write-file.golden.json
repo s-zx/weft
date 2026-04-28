@@ -1,0 +1,31 @@
+{
+  "name": "do-write-file",
+  "description": "Agent creates a new file when asked",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a file called greeting.txt with the text 'Hi there'",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/greeting.txt", "contents": "Hi there"}}
+          ]
+        },
+        {
+          "text": "Created greeting.txt with the requested content."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file"],
+    "files_created": ["greeting.txt"],
+    "files_contain": {
+      "greeting.txt": "Hi there"
+    }
+  }
+}

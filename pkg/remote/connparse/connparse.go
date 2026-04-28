@@ -9,8 +9,8 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/wshrpc"
-	"github.com/wavetermdev/waveterm/pkg/wshutil"
+	"github.com/s-zx/crest/pkg/wshrpc"
+	"github.com/s-zx/crest/pkg/wshutil"
 )
 
 const (

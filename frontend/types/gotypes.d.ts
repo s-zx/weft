@@ -42,6 +42,14 @@ declare global {
         configs: {[key: string]: AIModeConfigType};
     };
 
+    // wconfig.AIPermissionsConfig
+    type AIPermissionsConfig = {
+        allow?: string[];
+        deny?: string[];
+        ask?: string[];
+        defaultPosture?: string;
+    };
+
     // wshrpc.ActivityDisplayType
     type ActivityDisplayType = {
         width: number;
@@ -559,6 +567,18 @@ declare global {
         truncated?: boolean;
     };
 
+    // wshrpc.CommandListProviderModelsData
+    type CommandListProviderModelsData = {
+        apitype: string;
+        baseurl?: string;
+        apitoken?: string;
+    };
+
+    // wshrpc.CommandListProviderModelsRtnData
+    type CommandListProviderModelsRtnData = {
+        models: ProviderModelInfo[];
+    };
+
     // wshrpc.CommandMakeDraftFromLocalData
     type CommandMakeDraftFromLocalData = {
         localappid: string;
@@ -739,6 +759,15 @@ declare global {
         delete?: boolean;
     };
 
+    // wshrpc.CommandShowBlockData
+    type CommandShowBlockData = {
+        blockid: string;
+        tabid: string;
+        targetblockid?: string;
+        targetaction?: string;
+        focused?: boolean;
+    };
+
     // wshrpc.CommandStartBuilderData
     type CommandStartBuilderData = {
         builderid: string;
@@ -840,8 +869,13 @@ declare global {
 
     // wshrpc.CommandWaveAIToolApproveData
     type CommandWaveAIToolApproveData = {
+        chatid?: string;
         toolcallid: string;
         approval?: string;
+        acceptedtoolname?: string;
+        acceptedcontent?: string;
+        accepteddestination?: string;
+        cwd?: string;
     };
 
     // wshrpc.CommandWaveFileReadStreamData
@@ -849,6 +883,21 @@ declare global {
         zoneid: string;
         name: string;
         streammeta: StreamMeta;
+    };
+
+    // wshrpc.CommandWebClickData
+    type CommandWebClickData = {
+        workspaceid: string;
+        blockid: string;
+        tabid: string;
+        selector: string;
+    };
+
+    // wshrpc.CommandWebScreenshotData
+    type CommandWebScreenshotData = {
+        workspaceid: string;
+        blockid: string;
+        tabid: string;
     };
 
     // wshrpc.CommandWebSelectorData
@@ -1188,6 +1237,16 @@ declare global {
         blockid: string;
     };
 
+    // wconfig.MCPServerConfig
+    type MCPServerConfig = {
+        command?: string;
+        args?: string[];
+        env?: {[key: string]: string};
+        type?: string;
+        url?: string;
+        enabled?: boolean;
+    };
+
     // waveobj.MetaTSType
     type MetaType = {
         view?: string;
@@ -1268,11 +1327,6 @@ declare global {
         "layout:widgetsvisible"?: boolean;
         "layout:fileexplorervisible"?: boolean;
         "layout:fileexplorerwidth"?: number;
-        "waveai:panelopen"?: boolean;
-        "waveai:panelwidth"?: number;
-        "waveai:model"?: string;
-        "waveai:chatid"?: string;
-        "waveai:widgetcontext"?: boolean;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
@@ -1407,14 +1461,12 @@ declare global {
         cpusum?: number;
     };
 
-    // uctypes.RateLimitInfo
-    type RateLimitInfo = {
-        req: number;
-        reqlimit: number;
-        preq: number;
-        preqlimit: number;
-        resetepoch: number;
-        unknown?: boolean;
+    // wshrpc.ProviderModelInfo
+    type ProviderModelInfo = {
+        id: string;
+        name?: string;
+        description?: string;
+        context?: number;
     };
 
     // wshrpc.RemoteInfo
@@ -1492,22 +1544,15 @@ declare global {
         "app:focusfollowscursor"?: string;
         "app:tabbar"?: string;
         "feature:waveappbuilder"?: boolean;
-        "ai:*"?: boolean;
-        "ai:preset"?: string;
         "ai:apitype"?: string;
         "ai:baseurl"?: string;
         "ai:apitoken"?: string;
-        "ai:name"?: string;
+        "ai:apitokensecretname"?: string;
         "ai:model"?: string;
-        "ai:orgid"?: string;
-        "ai:apiversion"?: string;
         "ai:maxtokens"?: number;
         "ai:timeoutms"?: number;
-        "ai:proxyurl"?: string;
-        "ai:fontsize"?: number;
-        "ai:fixedfontsize"?: number;
-        "waveai:showcloudmodes"?: boolean;
-        "waveai:defaultmode"?: string;
+        "ai:mcpservers"?: {[key: string]: MCPServerConfig};
+        "ai:permissions"?: AIPermissionsConfig;
         "term:*"?: boolean;
         "term:fontsize"?: number;
         "term:fontfamily"?: string;
@@ -1678,7 +1723,6 @@ declare global {
         "loc:countrycode"?: string;
         "loc:regioncode"?: string;
         "settings:customwidgets"?: number;
-        "settings:customaipresets"?: number;
         "settings:customsettings"?: number;
         "settings:customaimodes"?: number;
         "settings:secretscount"?: number;
@@ -1738,8 +1782,6 @@ declare global {
         "waveai:toolusecount"?: number;
         "waveai:tooluseerrorcount"?: number;
         "waveai:tooldetail"?: {[key: string]: number};
-        "waveai:premiumreq"?: number;
-        "waveai:proxyreq"?: number;
         "waveai:haderror"?: boolean;
         "waveai:imagecount"?: number;
         "waveai:pdfcount"?: number;
@@ -1752,7 +1794,6 @@ declare global {
         "waveai:mode"?: string;
         "waveai:provider"?: string;
         "waveai:islocal"?: boolean;
-        "waveai:feedback"?: "good" | "bad";
         "waveai:action"?: string;
         "job:donereason"?: string;
         "job:kind"?: string;
@@ -1779,7 +1820,6 @@ declare global {
         "loc:countrycode"?: string;
         "loc:regioncode"?: string;
         "settings:customwidgets"?: number;
-        "settings:customaipresets"?: number;
         "settings:customsettings"?: number;
         "settings:customaimodes"?: number;
         "settings:secretscount"?: number;

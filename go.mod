@@ -1,4 +1,4 @@
-module github.com/wavetermdev/waveterm
+module github.com/s-zx/crest
 
 go 1.25.6
 
@@ -21,8 +21,10 @@ require (
 	github.com/junegunn/fzf v0.65.2
 	github.com/kevinburke/ssh_config v1.2.0
 	github.com/launchdarkly/eventsource v1.11.0
+	github.com/mark3labs/mcp-go v0.49.0
 	github.com/mattn/go-sqlite3 v1.14.40
 	github.com/mitchellh/mapstructure v1.5.0
+	github.com/s-zx/crest/tsunami v0.12.3
 	github.com/sawka/txwrap v0.2.0
 	github.com/shirou/gopsutil/v4 v4.26.3
 	github.com/skeema/knownhosts v1.3.1
@@ -30,7 +32,6 @@ require (
 	github.com/spf13/cobra v1.10.2
 	github.com/ubuntu/gowsl v0.0.0-20240906163211-049fd49bd93b
 	github.com/wavetermdev/htmltoken v0.2.0
-	github.com/wavetermdev/waveterm/tsunami v0.12.3
 	golang.org/x/crypto v0.50.0
 	golang.org/x/mod v0.34.0
 	golang.org/x/sync v0.20.0
@@ -53,6 +54,7 @@ require (
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
+	github.com/google/jsonschema-go v0.4.2 // indirect
 	github.com/google/s2a-go v0.1.9 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.3.14 // indirect
 	github.com/googleapis/gax-go/v2 v2.21.0 // indirect
@@ -63,11 +65,13 @@ require (
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sirupsen/logrus v1.9.3 // indirect
+	github.com/spf13/cast v1.7.1 // indirect
 	github.com/spf13/pflag v1.0.9 // indirect
 	github.com/tklauser/go-sysconf v0.3.16 // indirect
 	github.com/tklauser/numcpus v0.11.0 // indirect
 	github.com/ubuntu/decorate v0.0.0-20230125165522-2d5b0a9bb117 // indirect
 	github.com/wk8/go-ordered-map/v2 v2.1.8 // indirect
+	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.4 // indirect
 	go.opentelemetry.io/auto/sdk v1.2.1 // indirect
 	go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc v0.67.0 // indirect
@@ -90,4 +94,4 @@ replace github.com/kevinburke/ssh_config => github.com/wavetermdev/ssh_config v0
 
 replace github.com/creack/pty => github.com/photostorm/pty v1.1.19-0.20230903182454-31354506054b
 
-replace github.com/wavetermdev/waveterm/tsunami => ./tsunami
+replace github.com/s-zx/crest/tsunami => ./tsunami

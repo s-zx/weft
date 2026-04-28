@@ -13,11 +13,11 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/wavetermdev/waveterm/pkg/cmdblock/cbtypes"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/wcore"
-	"github.com/wavetermdev/waveterm/pkg/wps"
-	"github.com/wavetermdev/waveterm/pkg/wstore"
+	"github.com/s-zx/crest/pkg/cmdblock/cbtypes"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/wcore"
+	"github.com/s-zx/crest/pkg/wps"
+	"github.com/s-zx/crest/pkg/wstore"
 )
 
 var altScreenEnterSeq = []byte("\x1b[?1049h")

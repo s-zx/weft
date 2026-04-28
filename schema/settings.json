@@ -1,8 +1,70 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/wavetermdev/waveterm/pkg/wconfig/settings-type",
+  "$id": "https://github.com/s-zx/crest/pkg/wconfig/settings-type",
   "$ref": "#/$defs/SettingsType",
   "$defs": {
+    "AIPermissionsConfig": {
+      "properties": {
+        "allow": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "deny": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ask": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "defaultPosture": {
+          "type": "string",
+          "enum": [
+            "default",
+            "acceptEdits",
+            "bypass"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
+    "MCPServerConfig": {
+      "properties": {
+        "command": {
+          "type": "string"
+        },
+        "args": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "type": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "SettingsType": {
       "properties": {
         "app:*": {
@@ -53,12 +115,6 @@
         "feature:waveappbuilder": {
           "type": "boolean"
         },
-        "ai:*": {
-          "type": "boolean"
-        },
-        "ai:preset": {
-          "type": "string"
-        },
         "ai:apitype": {
           "type": "string"
         },
@@ -68,16 +124,10 @@
         "ai:apitoken": {
           "type": "string"
         },
-        "ai:name": {
+        "ai:apitokensecretname": {
           "type": "string"
         },
         "ai:model": {
-          "type": "string"
-        },
-        "ai:orgid": {
-          "type": "string"
-        },
-        "ai:apiversion": {
           "type": "string"
         },
         "ai:maxtokens": {
@@ -86,20 +136,14 @@
         "ai:timeoutms": {
           "type": "number"
         },
-        "ai:proxyurl": {
-          "type": "string"
+        "ai:mcpservers": {
+          "additionalProperties": {
+            "$ref": "#/$defs/MCPServerConfig"
+          },
+          "type": "object"
         },
-        "ai:fontsize": {
-          "type": "number"
-        },
-        "ai:fixedfontsize": {
-          "type": "number"
-        },
-        "waveai:showcloudmodes": {
-          "type": "boolean"
-        },
-        "waveai:defaultmode": {
-          "type": "string"
+        "ai:permissions": {
+          "$ref": "#/$defs/AIPermissionsConfig"
         },
         "term:*": {
           "type": "boolean"

@@ -9,16 +9,16 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/wavetermdev/waveterm/pkg/service/blockservice"
-	"github.com/wavetermdev/waveterm/pkg/service/clientservice"
-	"github.com/wavetermdev/waveterm/pkg/service/objectservice"
-	"github.com/wavetermdev/waveterm/pkg/service/userinputservice"
-	"github.com/wavetermdev/waveterm/pkg/service/windowservice"
-	"github.com/wavetermdev/waveterm/pkg/service/workspaceservice"
-	"github.com/wavetermdev/waveterm/pkg/tsgen/tsgenmeta"
-	"github.com/wavetermdev/waveterm/pkg/util/utilfn"
-	"github.com/wavetermdev/waveterm/pkg/waveobj"
-	"github.com/wavetermdev/waveterm/pkg/web/webcmd"
+	"github.com/s-zx/crest/pkg/service/blockservice"
+	"github.com/s-zx/crest/pkg/service/clientservice"
+	"github.com/s-zx/crest/pkg/service/objectservice"
+	"github.com/s-zx/crest/pkg/service/userinputservice"
+	"github.com/s-zx/crest/pkg/service/windowservice"
+	"github.com/s-zx/crest/pkg/service/workspaceservice"
+	"github.com/s-zx/crest/pkg/tsgen/tsgenmeta"
+	"github.com/s-zx/crest/pkg/util/utilfn"
+	"github.com/s-zx/crest/pkg/waveobj"
+	"github.com/s-zx/crest/pkg/web/webcmd"
 )
 
 var ServiceMap = map[string]any{

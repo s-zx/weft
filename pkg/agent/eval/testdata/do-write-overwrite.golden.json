@@ -1,0 +1,33 @@
+{
+  "name": "do-write-overwrite",
+  "description": "Agent overwrites an existing file with new content",
+  "mode": "do",
+  "setup": {
+    "files": {
+      "version.txt": "v1.0.0"
+    }
+  },
+  "turns": [
+    {
+      "user": "Update version.txt to say v2.0.0",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/version.txt", "contents": "v2.0.0"}}
+          ]
+        },
+        {
+          "text": "Updated version.txt to v2.0.0."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file"],
+    "files_created": ["version.txt"],
+    "files_contain": {
+      "version.txt": "v2.0.0"
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "name": "do-write-script",
+  "description": "Agent writes a bash script with executable content",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a bash script called deploy.sh that checks if docker is running, builds an image tagged 'myapp:latest', and pushes it to a registry at registry.example.com.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/deploy.sh", "contents": "#!/bin/bash\nset -euo pipefail\n\nIMAGE=\"registry.example.com/myapp:latest\"\n\nif ! docker info > /dev/null 2>&1; then\n  echo \"Error: Docker is not running\"\n  exit 1\nfi\n\necho \"Building image...\"\ndocker build -t \"$IMAGE\" .\n\necho \"Pushing image...\"\ndocker push \"$IMAGE\"\n\necho \"Deploy complete.\""}}
+          ]
+        },
+        {
+          "text": "Created deploy.sh. The script checks that Docker is running, builds the image as registry.example.com/myapp:latest, and pushes it to the registry."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file"],
+    "files_created": ["deploy.sh"],
+    "files_contain": {
+      "deploy.sh": "#!/bin/bash"
+    }
+  }
+}

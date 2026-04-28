@@ -7,26 +7,26 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/anthropic"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/gemini"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/openai"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/openaichat"
-	"github.com/wavetermdev/waveterm/pkg/aiusechat/uctypes"
-	"github.com/wavetermdev/waveterm/pkg/web/sse"
+	"github.com/s-zx/crest/pkg/aiusechat/anthropic"
+	"github.com/s-zx/crest/pkg/aiusechat/gemini"
+	"github.com/s-zx/crest/pkg/aiusechat/openai"
+	"github.com/s-zx/crest/pkg/aiusechat/openaichat"
+	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
+	"github.com/s-zx/crest/pkg/web/sse"
 )
 
 // UseChatBackend defines the interface for AI chat backend providers (OpenAI, Anthropic, etc.)
 // This interface abstracts the provider-specific API calls needed by the usechat system.
 type UseChatBackend interface {
 	// RunChatStep executes a single step in the chat conversation with the AI backend.
-	// Returns the stop reason, native messages from the response, rate limit info, and any error.
-	// The cont parameter allows continuing from a previous response (e.g., after rate limiting).
+	// Returns the stop reason, native messages from the response, and any error.
+	// The cont parameter allows continuing from a previous response.
 	RunChatStep(
 		ctx context.Context,
 		sseHandler *sse.SSEHandlerCh,
 		chatOpts uctypes.WaveChatOpts,
 		cont *uctypes.WaveContinueResponse,
-	) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, *uctypes.RateLimitInfo, error)
+	) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, error)
 
 	// UpdateToolUseData updates the tool use data for a specific tool call in the chat.
 	// This is used to update the UI state for tool execution (approval status, results, etc.)
@@ -85,13 +85,13 @@ func (b *openaiResponsesBackend) RunChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, *uctypes.RateLimitInfo, error) {
-	stopReason, msgs, rateLimitInfo, err := openai.RunOpenAIChatStep(ctx, sseHandler, chatOpts, cont)
+) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, error) {
+	stopReason, msgs, err := openai.RunOpenAIChatStep(ctx, sseHandler, chatOpts, cont)
 	var genMsgs []uctypes.GenAIMessage
 	for _, msg := range msgs {
 		genMsgs = append(genMsgs, msg)
 	}
-	return stopReason, genMsgs, rateLimitInfo, err
+	return stopReason, genMsgs, err
 }
 
 func (b *openaiResponsesBackend) UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {
@@ -143,13 +143,13 @@ func (b *openaiCompletionsBackend) RunChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, *uctypes.RateLimitInfo, error) {
-	stopReason, msgs, rateLimitInfo, err := openaichat.RunChatStep(ctx, sseHandler, chatOpts, cont)
+) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, error) {
+	stopReason, msgs, err := openaichat.RunChatStep(ctx, sseHandler, chatOpts, cont)
 	var genMsgs []uctypes.GenAIMessage
 	for _, msg := range msgs {
 		genMsgs = append(genMsgs, msg)
 	}
-	return stopReason, genMsgs, rateLimitInfo, err
+	return stopReason, genMsgs, err
 }
 
 func (b *openaiCompletionsBackend) UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {
@@ -184,12 +184,12 @@ func (b *anthropicBackend) RunChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, *uctypes.RateLimitInfo, error) {
-	stopReason, msg, rateLimitInfo, err := anthropic.RunAnthropicChatStep(ctx, sseHandler, chatOpts, cont)
+) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, error) {
+	stopReason, msg, err := anthropic.RunAnthropicChatStep(ctx, sseHandler, chatOpts, cont)
 	if msg == nil {
-		return stopReason, nil, rateLimitInfo, err
+		return stopReason, nil, err
 	}
-	return stopReason, []uctypes.GenAIMessage{msg}, rateLimitInfo, err
+	return stopReason, []uctypes.GenAIMessage{msg}, err
 }
 
 func (b *anthropicBackend) UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {
@@ -228,12 +228,12 @@ func (b *geminiBackend) RunChatStep(
 	sseHandler *sse.SSEHandlerCh,
 	chatOpts uctypes.WaveChatOpts,
 	cont *uctypes.WaveContinueResponse,
-) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, *uctypes.RateLimitInfo, error) {
-	stopReason, msg, rateLimitInfo, err := gemini.RunGeminiChatStep(ctx, sseHandler, chatOpts, cont)
+) (*uctypes.WaveStopReason, []uctypes.GenAIMessage, error) {
+	stopReason, msg, err := gemini.RunGeminiChatStep(ctx, sseHandler, chatOpts, cont)
 	if msg == nil {
-		return stopReason, nil, rateLimitInfo, err
+		return stopReason, nil, err
 	}
-	return stopReason, []uctypes.GenAIMessage{msg}, rateLimitInfo, err
+	return stopReason, []uctypes.GenAIMessage{msg}, err
 }
 
 func (b *geminiBackend) UpdateToolUseData(chatId string, toolCallId string, toolUseData uctypes.UIMessageDataToolUse) error {

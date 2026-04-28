@@ -1,0 +1,31 @@
+{
+  "name": "do-write-new-file",
+  "description": "Agent writes a new multi-line file",
+  "mode": "do",
+  "setup": {
+    "files": {}
+  },
+  "turns": [
+    {
+      "user": "Create a file called todo.md with a markdown checklist of three items: buy groceries, clean house, walk the dog.",
+      "responses": [
+        {
+          "text": "",
+          "tool_calls": [
+            {"name": "write_text_file", "input": {"filename": "{{CWD}}/todo.md", "contents": "# TODO\n\n- [ ] Buy groceries\n- [ ] Clean house\n- [ ] Walk the dog\n"}}
+          ]
+        },
+        {
+          "text": "Created todo.md with a three-item checklist."
+        }
+      ]
+    }
+  ],
+  "assertions": {
+    "tools_called": ["write_text_file"],
+    "files_created": ["todo.md"],
+    "files_contain": {
+      "todo.md": "- [ ] Buy groceries"
+    }
+  }
+}

@@ -1,8 +1,7 @@
 // Copyright 2026, Command Line Inc.
 // SPDX-License-Identifier: Apache-2.0
 
-import { UseChatSendMessageType, UseChatSetMessagesType } from "@/app/aipanel/aitypes";
-import { WaveAIModel } from "@/app/aipanel/waveai-model";
+import { UseChatSendMessageType, UseChatSetMessagesType } from "@/store/aitypes";
 import { BlockNodeModel } from "@/app/block/blocktypes";
 import { appHandleKeyDown } from "@/app/store/keymodel";
 import { modalsModel } from "@/app/store/modalmodel";
@@ -88,13 +87,20 @@ export class TermViewModel implements ViewModel {
     termAgentVisible: jotai.PrimitiveAtom<boolean>;
     termAgentComposerOpen: jotai.PrimitiveAtom<boolean>;
     termAgentInput: jotai.PrimitiveAtom<string>;
-    termAgentError: jotai.PrimitiveAtom<string | null>;
+    termAgentNotice: jotai.PrimitiveAtom<string | null>;
     termAgentChatId: jotai.PrimitiveAtom<string>;
+    // Permissions posture controls per-call approval strictness.
+    // "default" (every mutating call asks), "acceptEdits" (file edits in
+    // cwd auto-allowed; the bundled default), "bypass" (all auto-allowed
+    // — bypass-immune safety still fires). Cycled by Shift+Tab in the
+    // overlay; stored per-chat.
+    termAgentPosture: jotai.PrimitiveAtom<string>;
     termAgentSendMessage: UseChatSendMessageType | null;
     termAgentSetMessages: UseChatSetMessagesType | null;
     termAgentStop: (() => void) | null;
     termAgentChatStatus: string;
     termAgentRealMessage: any | null;
+    termAgentPendingContext: { cwd?: string; connection?: string; last_command?: string };
     searchAtoms?: SearchAtoms;
 
     constructor({ blockId, nodeModel, tabModel }: ViewModelInitType) {
@@ -122,13 +128,15 @@ export class TermViewModel implements ViewModel {
         this.termAgentVisible = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
         this.termAgentComposerOpen = jotai.atom(false) as jotai.PrimitiveAtom<boolean>;
         this.termAgentInput = jotai.atom("") as jotai.PrimitiveAtom<string>;
-        this.termAgentError = jotai.atom(null) as jotai.PrimitiveAtom<string | null>;
+        this.termAgentNotice = jotai.atom(null) as jotai.PrimitiveAtom<string | null>;
         this.termAgentChatId = jotai.atom(crypto.randomUUID()) as jotai.PrimitiveAtom<string>;
+        this.termAgentPosture = jotai.atom("acceptEdits") as jotai.PrimitiveAtom<string>;
         this.termAgentSendMessage = null;
         this.termAgentSetMessages = null;
         this.termAgentStop = null;
         this.termAgentChatStatus = "ready";
         this.termAgentRealMessage = null;
+        this.termAgentPendingContext = {};
         this.viewIcon = jotai.atom((get) => {
             const termMode = get(this.termMode);
             if (termMode == "vdom") {
@@ -545,34 +553,48 @@ export class TermViewModel implements ViewModel {
         this.termAgentStop = stop;
     }
 
-    getAndClearTermAgentMessage(): any | null {
-        const msg = this.termAgentRealMessage;
-        this.termAgentRealMessage = null;
-        return msg;
+    getAndClearTermAgentMessage(): any {
+        return this.termAgentRealMessage ?? { messageid: crypto.randomUUID(), parts: [{ type: "text", text: "continue" }] };
     }
 
-    setTermAgentError(message: string | null) {
-        globalStore.set(this.termAgentError, message);
+    getAndClearTermAgentPendingContext(): { cwd?: string; connection?: string; last_command?: string } {
+        const ctx = this.termAgentPendingContext;
+        this.termAgentPendingContext = {};
+        return ctx;
     }
 
-    getTermAgentMode(): string {
-        const aiModel = WaveAIModel.getInstance();
-        const currentMode = globalStore.get(aiModel.currentAIMode);
-        if (currentMode && aiModel.isValidMode(currentMode)) {
-            return currentMode;
-        }
-        const defaultMode = globalStore.get(aiModel.defaultModeAtom);
-        if (defaultMode && aiModel.isValidMode(defaultMode)) {
-            return defaultMode;
-        }
-        return currentMode ?? defaultMode ?? "";
+    getTermAgentCwd(): string | undefined {
+        return this.buildTermAgentContext().cwd;
+    }
+
+    getTermAgentModelOverride(): string {
+        return this.termAgentModelOverride ?? "";
+    }
+
+    termAgentModelOverride: string | null = null;
+
+    buildTermAgentContext(): { cwd?: string; connection?: string; last_command?: string } {
+        const cwd = globalStore.get(getBlockMetaKeyAtom(this.blockId, "cmd:cwd"));
+        const connName = globalStore.get(getBlockMetaKeyAtom(this.blockId, "connection"));
+        const lastCommand = this.termRef.current?.lastCommandAtom
+            ? globalStore.get(this.termRef.current.lastCommandAtom)
+            : null;
+        const out: { cwd?: string; connection?: string; last_command?: string } = {};
+        if (typeof cwd === "string" && cwd) out.cwd = cwd;
+        if (typeof connName === "string" && connName) out.connection = connName;
+        if (typeof lastCommand === "string" && lastCommand) out.last_command = lastCommand;
+        return out;
+    }
+
+    setTermAgentNotice(message: string | null) {
+        globalStore.set(this.termAgentNotice, message);
     }
 
     openTermAgentComposer() {
         globalStore.set(this.termAgentVisible, true);
         globalStore.set(this.termAgentComposerOpen, true);
         globalStore.set(this.termAgentInput, "");
-        globalStore.set(this.termAgentError, null);
+        globalStore.set(this.termAgentNotice, null);
     }
 
     closeTermAgentComposer() {
@@ -585,11 +607,39 @@ export class TermViewModel implements ViewModel {
         globalStore.set(this.termAgentVisible, false);
     }
 
+    termAgentLastPlanPath: string | null = null;
+    termAgentPendingPlanPath: string | null = null;
+
     clearTermAgentSession() {
         this.termAgentStop?.();
         globalStore.set(this.termAgentChatId, crypto.randomUUID());
-        globalStore.set(this.termAgentError, null);
+        globalStore.set(this.termAgentNotice, null);
         this.termAgentSetMessages?.([]);
+        this.termAgentLastPlanPath = null;
+    }
+
+    getAndClearTermAgentPlanPath(): string {
+        const path = this.termAgentPendingPlanPath;
+        this.termAgentPendingPlanPath = null;
+        return path ?? "";
+    }
+
+    executePlan() {
+        if (!this.termAgentLastPlanPath || !this.termAgentSendMessage) {
+            return;
+        }
+        const planPath = this.termAgentLastPlanPath;
+        const msg = `Execute the plan at ${planPath}`;
+        this.termAgentPendingPlanPath = planPath;
+        this.termAgentRealMessage = {
+            messageid: crypto.randomUUID(),
+            parts: [{ type: "text", text: msg }],
+        };
+        this.termAgentPendingContext = this.buildTermAgentContext();
+        globalStore.set(this.termAgentVisible, true);
+        globalStore.set(this.termAgentNotice, null);
+        this.closeTermAgentComposer();
+        this.termAgentSendMessage({ parts: [{ type: "text", text: msg }] });
     }
 
     canOpenTermAgent(): boolean {
@@ -606,38 +656,11 @@ export class TermViewModel implements ViewModel {
         const inputEmpty = this.termRef.current?.shellInputEmptyAtom
             ? globalStore.get(this.termRef.current.shellInputEmptyAtom)
             : null;
+        // when shell integration is not available, allow opening anyway
+        if (shellState == null) {
+            return true;
+        }
         return shellState === "ready" && inputEmpty === true;
-    }
-
-    buildTermAgentPrompt(userInput: string): string {
-        const cwd = globalStore.get(getBlockMetaKeyAtom(this.blockId, "cmd:cwd"));
-        const connName = globalStore.get(getBlockMetaKeyAtom(this.blockId, "connection"));
-        const lastCommand = this.termRef.current?.lastCommandAtom
-            ? globalStore.get(this.termRef.current.lastCommandAtom)
-            : null;
-        const contextLines = [`block_id: ${this.blockId}`];
-        if (connName) {
-            contextLines.push(`connection: ${connName}`);
-        }
-        if (cwd) {
-            contextLines.push(`cwd: ${cwd}`);
-        }
-        if (lastCommand) {
-            contextLines.push(`last_command: ${lastCommand}`);
-        }
-        return [
-            "You are the native in-terminal agent inside Crest.",
-            "The user invoked you from a terminal overlay. Use tab context and tools when needed.",
-            "If a tool action needs approval, wait for the user to approve it in the overlay.",
-            "",
-            "<terminal_context>",
-            ...contextLines,
-            "</terminal_context>",
-            "",
-            "<user_request>",
-            userInput,
-            "</user_request>",
-        ].join("\n");
     }
 
     async submitTermAgentPrompt(): Promise<void> {
@@ -650,12 +673,7 @@ export class TermViewModel implements ViewModel {
             return;
         }
         if (!this.termAgentSendMessage) {
-            this.setTermAgentError("Terminal agent is still initializing.");
-            return;
-        }
-        const aiMode = this.getTermAgentMode();
-        if (!aiMode) {
-            this.setTermAgentError("Configure an AI mode and API key before using the terminal agent.");
+            this.setTermAgentNotice("Terminal agent is still initializing.");
             return;
         }
         if (userInput === "clear" || userInput === "new") {
@@ -664,13 +682,29 @@ export class TermViewModel implements ViewModel {
             globalStore.set(this.termAgentVisible, true);
             return;
         }
+        if (userInput.startsWith("model ")) {
+            const modelName = userInput.slice("model ".length).trim();
+            if (modelName) {
+                this.termAgentModelOverride = modelName;
+                globalStore.set(this.termAgentChatId, crypto.randomUUID());
+                globalStore.set(this.termAgentNotice, `Model switched to: ${modelName}`);
+                this.closeTermAgentComposer();
+                globalStore.set(this.termAgentVisible, true);
+            }
+            return;
+        }
 
+        // Permissions v2: no more mode prefix routing. The prompt goes
+        // straight to the agent in "do" mode (full toolset). Posture
+        // — set on the overlay via Shift+Tab — is the only strictness
+        // axis the user controls per-chat.
         this.termAgentRealMessage = {
             messageid: crypto.randomUUID(),
-            parts: [{ type: "text", text: this.buildTermAgentPrompt(userInput) }],
+            parts: [{ type: "text", text: userInput }],
         };
+        this.termAgentPendingContext = this.buildTermAgentContext();
         globalStore.set(this.termAgentVisible, true);
-        globalStore.set(this.termAgentError, null);
+        globalStore.set(this.termAgentNotice, null);
         this.closeTermAgentComposer();
 
         try {
@@ -680,7 +714,7 @@ export class TermViewModel implements ViewModel {
         } catch (error) {
             console.error("failed to submit terminal agent prompt", error);
             const message = error instanceof Error ? error.message : String(error);
-            this.setTermAgentError(message);
+            this.setTermAgentNotice(message);
         }
     }
 
@@ -1090,22 +1124,6 @@ export class TermViewModel implements ViewModel {
                     }
                 },
             });
-            menu.push({ type: "separator" });
-            menu.push({
-                label: "Send to Wave AI",
-                click: () => {
-                    if (selection) {
-                        const aiModel = WaveAIModel.getInstance();
-                        aiModel.appendText(selection, true, { scrollToBottom: true });
-                        const layoutModel = WorkspaceLayoutModel.getInstance();
-                        if (!layoutModel.getAIPanelVisible()) {
-                            layoutModel.setAIPanelVisible(true);
-                        }
-                        aiModel.focusInput();
-                    }
-                },
-            });
-
             menu.push({ type: "separator" });
         }
 

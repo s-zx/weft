@@ -27,6 +27,10 @@ type WaveUIDataTypes = {
         errormessage?: string;
         approval?: "needs-approval" | "user-approved" | "user-denied" | "auto-approved" | "timeout";
         blockid?: string;
+        // True when the block exists but isn't laid out in the user's
+        // tab — the FE shows an "Open block" button to attach it.
+        // Currently only set by background shell_exec runs.
+        blockhidden?: boolean;
         writebackupfilename?: string;
         inputfilename?: string;
         originalcontent?: string;

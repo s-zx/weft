@@ -629,6 +629,12 @@ func ListAllEditableAppsCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) ([]wshr
 	return resp, err
 }
 
+// command "listprovidermodels", wshserver.ListProviderModelsCommand
+func ListProviderModelsCommand(w *wshutil.WshRpc, data wshrpc.CommandListProviderModelsData, opts *wshrpc.RpcOpts) (*wshrpc.CommandListProviderModelsRtnData, error) {
+	resp, err := sendRpcRequestCallHelper[*wshrpc.CommandListProviderModelsRtnData](w, "listprovidermodels", data, opts)
+	return resp, err
+}
+
 // command "macosversion", wshserver.MacOSVersionCommand
 func MacOSVersionCommand(w *wshutil.WshRpc, opts *wshrpc.RpcOpts) (string, error) {
 	resp, err := sendRpcRequestCallHelper[string](w, "macosversion", nil, opts)
@@ -900,6 +906,12 @@ func SetSecretsCommand(w *wshutil.WshRpc, data map[string]*string, opts *wshrpc.
 // command "setvar", wshserver.SetVarCommand
 func SetVarCommand(w *wshutil.WshRpc, data wshrpc.CommandVarData, opts *wshrpc.RpcOpts) error {
 	_, err := sendRpcRequestCallHelper[any](w, "setvar", data, opts)
+	return err
+}
+
+// command "showblock", wshserver.ShowBlockCommand
+func ShowBlockCommand(w *wshutil.WshRpc, data wshrpc.CommandShowBlockData, opts *wshrpc.RpcOpts) error {
+	_, err := sendRpcRequestCallHelper[any](w, "showblock", data, opts)
 	return err
 }
 

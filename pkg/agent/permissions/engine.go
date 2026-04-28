@@ -101,6 +101,28 @@ func (e *Engine) Decide(ctx context.Context, req CheckRequest) Decision {
 		}
 	}
 
+	// Step 2.5 — bypass posture short-circuits everything past tool-
+	// level Deny. "Bypass" is the user's explicit full-trust mode,
+	// modeled on Claude Code's --dangerously-skip-permissions:
+	//
+	//   - content-specific Deny rules (e.g. builtin `shell_exec(prefix:sudo)`
+	//     RuleDeny) are skipped here
+	//   - content-specific Ask rules (.env, .ssh) are skipped
+	//   - the safety layer (rm -rf /, .env writes) is skipped
+	//   - acceptEdits cwd-containment check is irrelevant
+	//
+	// Only tool-level Deny (Content == "") at Step 2 above still
+	// applies — that's reserved for "never run this whole tool" rules
+	// the user added explicitly. Anything narrower (per-command,
+	// per-path) yields to bypass. This is the contract; surprising it
+	// would defeat the point of a full-trust mode.
+	if req.Posture == PostureBypass {
+		return Decision{
+			Behavior: RuleAllow,
+			Reason:   DecisionReason{Kind: ReasonPosture, Detail: "bypass"},
+		}
+	}
+
 	// Step 3 — content-specific Deny + Ask rules. These short-circuit
 	// before safety because Deny anywhere is the authoritative refusal
 	// and Ask is more conservative than safety's Ask. Allow rules are
@@ -206,16 +228,11 @@ func (e *Engine) Decide(ctx context.Context, req CheckRequest) Decision {
 		}
 	}
 
-	// Step 7 — posture-driven auto-allow. Two paths: bypass auto-
-	// allows everything; acceptEdits auto-allows file-edit tools
-	// targeting paths inside cwd. Default posture falls through to
-	// the per-tool default in step 8.
-	if req.Posture == PostureBypass {
-		return Decision{
-			Behavior: RuleAllow,
-			Reason:   DecisionReason{Kind: ReasonPosture, Detail: "bypass"},
-		}
-	}
+	// Step 7 — posture-driven auto-allow for acceptEdits. Bypass
+	// already short-circuited at step 2.5; here we only handle the
+	// acceptEdits case: file-edit tools targeting paths inside cwd
+	// auto-allow. Default posture falls through to the per-tool
+	// default in step 8.
 	if req.Posture == PostureAcceptEdits && adapter != nil && adapter.IsFileEdit() {
 		target := adapter.TargetPath(req.Input)
 		if isInsideCwd(target, req.Cwd) {

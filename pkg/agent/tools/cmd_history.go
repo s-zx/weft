@@ -57,6 +57,11 @@ func CmdHistory(defaultBlockID string, approval func(any) string) uctypes.ToolDe
 		DisplayName: "Command History",
 		Description: "Report the last N commands run in a terminal block, including exit codes, durations, cwd, and optionally a short tail of each command's output. Defaults to the terminal block the agent was invoked from.",
 		ToolLogName: "agent:cmd_history",
+		Prompt: `cmd_history: Returns recent commands from the user's terminal block (cmd, cwd, exit code, duration).
+- Use this BEFORE asking the user "what did you just run?" — the answer is here.
+- Defaults to the agent's terminal block. Pass block_id only when you need another block.
+- Keep "include_output": false unless you specifically need command output — output adds a lot of tokens. If you need output, prefer get_scrollback for a targeted line range.
+- Parallel-safe.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

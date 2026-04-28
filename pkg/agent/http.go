@@ -14,10 +14,8 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
-	"github.com/s-zx/crest/pkg/aiusechat"
 	"github.com/s-zx/crest/pkg/aiusechat/uctypes"
 	"github.com/s-zx/crest/pkg/secretstore"
-	"github.com/s-zx/crest/pkg/waveobj"
 	"github.com/s-zx/crest/pkg/wconfig"
 	"github.com/s-zx/crest/pkg/web/sse"
 	"github.com/s-zx/crest/pkg/wstore"
@@ -88,7 +86,6 @@ type PostAgentMessageRequest struct {
 	BlockId           string            `json:"blockid"`
 	Mode              string            `json:"mode"`
 	PermissionPosture string            `json:"permission_posture,omitempty"`
-	AIMode            string            `json:"aimode"`
 	ModelOverride     string            `json:"modeloverride,omitempty"`
 	PlanPath          string            `json:"planpath,omitempty"`
 	Msg               uctypes.AIMessage `json:"msg"`
@@ -122,27 +119,6 @@ func isValidModelName(name string) bool {
 		}
 	}
 	return true
-}
-
-// resolveAgentAIOpts tries the waveai mode system first (for users with
-// waveai.json modes configured). If that fails — e.g. because the mode is a
-// cloud mode requiring telemetry, or the user only configured settings.json —
-// it falls back to building AIOptsType directly from the global AI settings.
-func resolveAgentAIOpts(tabId string, aiMode string) (*uctypes.AIOptsType, error) {
-	if aiMode != "" {
-		rtInfo := &waveobj.ObjRTInfo{}
-		if tabId != "" {
-			oref := waveobj.MakeORef(waveobj.OType_Tab, tabId)
-			if gotInfo := wstore.GetRTInfo(oref); gotInfo != nil {
-				rtInfo = gotInfo
-			}
-		}
-		opts, err := aiusechat.GetWaveAISettings(*rtInfo, aiMode)
-		if err == nil {
-			return opts, nil
-		}
-	}
-	return buildAIOptsFromSettings()
 }
 
 func buildAIOptsFromSettings() (*uctypes.AIOptsType, error) {
@@ -354,7 +330,7 @@ func PostAgentMessageHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	aiOpts, err := resolveAgentAIOpts(req.TabId, req.AIMode)
+	aiOpts, err := buildAIOptsFromSettings()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("WaveAI configuration error: %v", err), http.StatusInternalServerError)
 		return
@@ -402,6 +378,17 @@ func PostAgentMessageHandler(w http.ResponseWriter, r *http.Request) {
 
 	sseHandler := sse.MakeSSEHandlerCh(w, r.Context())
 	defer sseHandler.Close()
+
+	// Set up SSE before RunAgent so any error path — including backends
+	// that bail before reaching their happy-path SetupSSE on a 4xx from
+	// the upstream provider — can surface the failure as an error chunk
+	// the FE actually parses. Without this, status!=200 from the provider
+	// produced an empty 200 response and the agent appeared to hang.
+	if err := sseHandler.SetupSSE(); err != nil {
+		log.Printf("agent: SetupSSE failed: %v\n", err)
+		http.Error(w, "failed to setup SSE", http.StatusInternalServerError)
+		return
+	}
 
 	err = RunAgent(r.Context(), sseHandler, wstore.GetClientId(), AgentOpts{
 		Session:     sess,

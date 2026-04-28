@@ -180,7 +180,11 @@ export class GitModel {
             if (info.isrepo) {
                 const files = parseStatusOutput(statusResult.stdout);
                 globalStore.set(this.filesAtom, files);
-                // Reload diffs for already-expanded files
+                // Populate per-file stats up front so the panel shows
+                // real counts (not +0/-0) before the user expands a row.
+                // Cheap one-shot numstat, plus wc fallback for untracked.
+                fireAndForget(() => this.loadAllStats(files));
+                // Reload full line-level diffs for already-expanded files
                 const expanded = globalStore.get(this.expandedFilesAtom);
                 for (const path of expanded) {
                     fireAndForget(() => this.loadDiff(path));
@@ -191,6 +195,63 @@ export class GitModel {
         } finally {
             globalStore.set(this.loadingAtom, false);
         }
+    }
+
+    // loadAllStats fetches +/- counts for every changed file in one
+    // pass. Tracked changes come from `git diff --numstat HEAD` (single
+    // call, tiny output). Untracked files don't appear in numstat, so
+    // we fall back to `wc -l` per file — counting all their lines as
+    // additions, which matches how loadDiff treats them. Binary files
+    // show "-\t-" in numstat; we coerce to 0/0 since FileStats doesn't
+    // model binary specially.
+    private async loadAllStats(files: GitChangedFile[]): Promise<void> {
+        const cwd = globalStore.get(this.cwdAtom);
+        if (!cwd || files.length === 0) return;
+        const stats = new Map<string, FileStats>();
+        try {
+            const numstatResult = await RpcApi.RunLocalCmdCommand(TabRpcClient, {
+                cmd: "git",
+                args: ["diff", "--numstat", "HEAD"],
+                cwd,
+            });
+            for (const line of numstatResult.stdout.split("\n")) {
+                if (!line) continue;
+                const [addStr, delStr, ...pathParts] = line.split("\t");
+                const path = pathParts.join("\t");
+                if (!path) continue;
+                const a = parseInt(addStr, 10);
+                const d = parseInt(delStr, 10);
+                stats.set(path, { add: isNaN(a) ? 0 : a, del: isNaN(d) ? 0 : d });
+            }
+        } catch (e: any) {
+            console.warn(`git diff --numstat failed:`, e);
+        }
+        // Untracked files (and anything numstat skipped) — count their
+        // lines as additions. Run sequentially to keep this cheap; a
+        // typical changeset has at most a handful of untracked files.
+        const untracked = files.filter((f) => !stats.has(f.path));
+        for (const f of untracked) {
+            try {
+                const r = await RpcApi.RunLocalCmdCommand(TabRpcClient, {
+                    cmd: "wc",
+                    args: ["-l", f.path],
+                    cwd,
+                });
+                const n = parseInt(r.stdout.trim().split(/\s+/)[0], 10);
+                stats.set(f.path, { add: isNaN(n) ? 0 : n, del: 0 });
+            } catch {
+                stats.set(f.path, { add: 0, del: 0 });
+            }
+        }
+        // Merge with any existing stats from already-loaded full diffs
+        // — those are equivalent to numstat values, but the merge keeps
+        // a per-file race (loadDiff finishing after loadAllStats) from
+        // dropping richer entries.
+        const merged = new Map(globalStore.get(this.fileStatsAtom));
+        for (const [path, s] of stats) {
+            merged.set(path, s);
+        }
+        globalStore.set(this.fileStatsAtom, merged);
     }
 
     private async loadDiff(path: string): Promise<void> {

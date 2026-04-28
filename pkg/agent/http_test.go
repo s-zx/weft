@@ -44,23 +44,15 @@ func TestHandler_EmptyBody(t *testing.T) {
 }
 
 func TestHandler_InvalidChatID(t *testing.T) {
-	w := postJSON(t, map[string]any{"chatid": "not-a-uuid", "aimode": "waveai@balanced"})
+	w := postJSON(t, map[string]any{"chatid": "not-a-uuid"})
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for bad UUID, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
-func TestHandler_MissingAIMode(t *testing.T) {
-	w := postJSON(t, map[string]any{"chatid": "550e8400-e29b-41d4-a716-446655440000"})
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for missing aimode, got %d: %s", w.Code, w.Body.String())
 	}
 }
 
 func TestHandler_InvalidMode(t *testing.T) {
 	w := postJSON(t, map[string]any{
 		"chatid": "550e8400-e29b-41d4-a716-446655440000",
-		"aimode": "waveai@balanced",
 		"mode":   "invalid",
 	})
 	if w.Code != http.StatusBadRequest {

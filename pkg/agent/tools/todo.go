@@ -65,6 +65,12 @@ func TodoWrite(chatID string, approval func(any) string) uctypes.ToolDefinition 
 		DisplayName: "Todo Write",
 		Description: "Track your progress by updating a todo list. Items are upserted by matching on content text. Mention only the items you want to add or update; unmentioned items are left unchanged.",
 		ToolLogName: "agent:todo_write",
+		Prompt: `todo_write: Maintains a structured todo list for multi-step work.
+- Use it ANY time the user's request decomposes into ≥3 distinct steps. Skip it for trivial one-shot tasks.
+- Update is diff-based: only mention items you want to insert or change status. Items NOT mentioned stay as they are.
+- Status values: "pending" (not started), "in_progress" (actively working — keep at most one in_progress at a time), "completed" (done).
+- Mark an item completed AS SOON AS it's done — don't batch updates. The user watches this list to see progress.
+- Don't pre-fill an entire plan and then never update it. Each completed step should produce a todo_write call.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -146,6 +152,9 @@ func TodoRead(chatID string, approval func(any) string) uctypes.ToolDefinition {
 		Description: "Read the current todo list to check progress and pending items.",
 		ToolLogName: "agent:todo_read",
 		Parallel:    true,
+		Prompt: `todo_read: Returns the current todo list.
+- Use when you've been working a while and want to confirm what's still pending before deciding the next step.
+- Cheap — no side effects. Parallel-safe.`,
 		InputSchema: map[string]any{
 			"type":                 "object",
 			"properties":          map[string]any{},

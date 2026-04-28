@@ -46,6 +46,12 @@ func WritePlan(tabID, defaultTargetBlockID, defaultCwd, defaultConnection string
 		DisplayName: "Write Plan",
 		Description: "Write a markdown plan to <cwd>/.crest-plans/<slug>.md. Plans are short, actionable design documents the user can review before work begins.",
 		ToolLogName: "agent:write_plan",
+		Prompt: `write_plan: Writes a markdown design plan to .crest-plans/<slug>.md.
+- This is the ONLY mutation tool available in plan mode — use it to commit the design before any code changes happen.
+- Plans should be short and actionable: what's the goal, what's the approach, which files change, what's out of scope.
+- Avoid restating things the user already knows. Focus on decisions and trade-offs the user can review.
+- "title" → first H1 heading. "content" → body markdown. Keep total under ~512KB.
+- Set "open_preview": true the first time you write a plan in a session so the user can see it without hunting; subsequent updates can leave it false.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

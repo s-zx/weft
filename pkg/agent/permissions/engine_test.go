@@ -99,7 +99,7 @@ func TestDecide_ContentRuleAskFiresSuggestions(t *testing.T) {
 		ToolName: "shell_exec",
 		Input:    map[string]any{"command": "git push origin main"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleAsk {
 		t.Errorf("expected ask, got %v", d.Behavior)
@@ -112,6 +112,7 @@ func TestDecide_ContentRuleAskFiresSuggestions(t *testing.T) {
 func TestDecide_SafetyBeatsAllowRule(t *testing.T) {
 	// `allow shell_exec` rule, but `rm -rf /` triggers the safety
 	// layer (step 4) before we'd reach the tool-level allow (step 5).
+	// Default posture — bypass intentionally skips safety in v2.
 	rules := []Rule{
 		mustParse(t, "shell_exec", RuleAllow),
 	}
@@ -120,7 +121,7 @@ func TestDecide_SafetyBeatsAllowRule(t *testing.T) {
 		ToolName: "shell_exec",
 		Input:    map[string]any{"command": "rm -rf /"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass, // bypass should still respect safety
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleAsk {
 		t.Errorf("expected ask (safety check), got %v", d.Behavior)
@@ -130,20 +131,71 @@ func TestDecide_SafetyBeatsAllowRule(t *testing.T) {
 	}
 }
 
-func TestDecide_SafetyBeatsBypassPosture(t *testing.T) {
-	// No rules; bypass posture would otherwise allow. Safety still fires.
-	eng := makeEngine(t, nil)
+// TestDecide_BypassSkipsContentDeny locks in the contract that bypass
+// also bypasses CONTENT-specific Deny rules (e.g. builtin
+// `shell_exec(prefix:sudo)` RuleDeny). Only tool-level Deny (Content="")
+// survives bypass. This mirrors Claude Code's --dangerously-skip-permissions:
+// a partial Deny isn't a hard wall, only a whole-tool Deny is.
+func TestDecide_BypassSkipsContentDeny(t *testing.T) {
+	rules := []Rule{
+		mustParse(t, "shell_exec(prefix:sudo)", RuleDeny),
+	}
+	eng := makeEngine(t, rules)
+	d := eng.Decide(context.Background(), CheckRequest{
+		ToolName: "shell_exec",
+		Input:    map[string]any{"command": "sudo apt install foo"},
+		ChatId:   "chat-1",
+		Posture:  PostureBypass,
+	})
+	if d.Behavior != RuleAllow {
+		t.Errorf("bypass should auto-allow even when content-Deny matches, got %v (reason %v)", d.Behavior, d.Reason)
+	}
+	if d.Reason.Detail != "bypass" {
+		t.Errorf("expected reason detail=bypass, got %q", d.Reason.Detail)
+	}
+}
+
+// TestDecide_BypassRespectsToolLevelDeny: the one exception to bypass's
+// "let everything through" contract — tool-level (Content="") Deny rules
+// still fire. The user (or a builtin) saying "never run this whole tool"
+// is treated as inviolable.
+func TestDecide_BypassRespectsToolLevelDeny(t *testing.T) {
+	rules := []Rule{
+		mustParse(t, "shell_exec", RuleDeny),
+	}
+	eng := makeEngine(t, rules)
+	d := eng.Decide(context.Background(), CheckRequest{
+		ToolName: "shell_exec",
+		Input:    map[string]any{"command": "ls"},
+		ChatId:   "chat-1",
+		Posture:  PostureBypass,
+	})
+	if d.Behavior != RuleDeny {
+		t.Errorf("tool-level Deny should fire even under bypass, got %v (reason %v)", d.Behavior, d.Reason)
+	}
+}
+
+// TestDecide_BypassAllowsSensitivePaths locks in the v2 contract:
+// bypass posture is the user's explicit full-trust mode. .env writes,
+// rm -rf, and other normally-prompted operations all auto-allow. Only
+// tool-level Deny rules still apply (covered separately).
+func TestDecide_BypassAllowsSensitivePaths(t *testing.T) {
+	store := NewRuleStore()
+	store.SetBuiltinRules(BuiltinRules())
+	eng := NewEngine(store)
+	RegisterDefaultAdapters(eng)
+
 	d := eng.Decide(context.Background(), CheckRequest{
 		ToolName: "edit_text_file",
 		Input:    map[string]any{"filename": "/Users/me/.env"},
 		ChatId:   "chat-1",
 		Posture:  PostureBypass,
 	})
-	if d.Behavior != RuleAsk {
-		t.Errorf("expected ask, got %v (reason %v)", d.Behavior, d.Reason)
+	if d.Behavior != RuleAllow {
+		t.Errorf("bypass should allow .env writes, got %v (reason %v)", d.Behavior, d.Reason)
 	}
-	if d.Reason.Kind != ReasonSafetyCheck {
-		t.Errorf("expected safety check reason, got %v", d.Reason.Kind)
+	if d.Reason.Detail != "bypass" {
+		t.Errorf("expected reason detail=bypass, got %q", d.Reason.Detail)
 	}
 }
 
@@ -269,7 +321,11 @@ func TestDecide_BuiltinRulesAllowReads(t *testing.T) {
 	}
 }
 
-func TestDecide_BuiltinRulesDenyEnvWrite(t *testing.T) {
+// TestDecide_BuiltinRulesAskEnvWrite verifies the v2 contract: built-
+// in `.env` write rules are Ask (not Deny). Under default/acceptEdits
+// the user is prompted; bypass auto-allows (covered by
+// TestDecide_BypassAllowsSensitivePaths).
+func TestDecide_BuiltinRulesAskEnvWrite(t *testing.T) {
 	store := NewRuleStore()
 	store.SetBuiltinRules(BuiltinRules())
 	eng := NewEngine(store)
@@ -279,12 +335,10 @@ func TestDecide_BuiltinRulesDenyEnvWrite(t *testing.T) {
 		ToolName: "edit_text_file",
 		Input:    map[string]any{"filename": "/Users/me/repo/.env"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
-	// Built-in deny rule for `**/.env` should fire BEFORE safety check
-	// (deny rules with content matching are checked in step 3).
-	if d.Behavior != RuleDeny {
-		t.Errorf("builtin deny .env should fire, got %v (reason %v)", d.Behavior, d.Reason)
+	if d.Behavior != RuleAsk {
+		t.Errorf("builtin ask .env should fire, got %v (reason %v)", d.Behavior, d.Reason)
 	}
 }
 
@@ -303,7 +357,7 @@ func TestDecide_ContentAllowDoesNotBypassSafety(t *testing.T) {
 		ToolName: "shell_exec",
 		Input:    map[string]any{"command": "echo `rm -rf /`"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleAsk {
 		t.Errorf("content-Allow should not bypass safety, got %v (reason %v)", d.Behavior, d.Reason)
@@ -329,7 +383,7 @@ func TestDecide_PathAllowDoesNotBypassEnvSafety(t *testing.T) {
 		Input:    map[string]any{"filename": "/Users/me/work/.env"},
 		ChatId:   "chat-1",
 		Cwd:      "/Users/me/work",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleAsk {
 		t.Errorf("path-Allow should not bypass .env safety, got %v (reason %v)", d.Behavior, d.Reason)
@@ -370,7 +424,7 @@ func TestDecide_ContentDenyStillShortCircuitsBeforeSafety(t *testing.T) {
 		ToolName: "shell_exec",
 		Input:    map[string]any{"command": "echo `rm -rf /`"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleDeny {
 		t.Errorf("content-Deny should fire before safety, got %v (reason %v)", d.Behavior, d.Reason)
@@ -407,7 +461,8 @@ func TestDecide_DefaultPostureContentRuleAskBeatsAllow(t *testing.T) {
 // before the bug fix.
 func TestDecide_NoDenyRule_SafetyStillCatchesEnv(t *testing.T) {
 	// Tool-level allow on edit_text_file, NO deny rule. Safety must
-	// still catch the .env path.
+	// still catch the .env path under default/acceptEdits posture.
+	// (Bypass intentionally skips safety in v2.)
 	rules := []Rule{
 		mustParse(t, "edit_text_file", RuleAllow),
 	}
@@ -416,7 +471,7 @@ func TestDecide_NoDenyRule_SafetyStillCatchesEnv(t *testing.T) {
 		ToolName: "edit_text_file",
 		Input:    map[string]any{"filename": "/Users/me/work/.env"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Behavior != RuleAsk {
 		t.Errorf("safety should catch .env even without deny rule, got %v (reason %v)", d.Behavior, d.Reason)
@@ -458,7 +513,7 @@ func TestDecide_SafetyAskCarriesSuggestions(t *testing.T) {
 		ToolName: "edit_text_file",
 		Input:    map[string]any{"filename": "/Users/me/.env"},
 		ChatId:   "chat-1",
-		Posture:  PostureBypass,
+		Posture:  PostureDefault,
 	})
 	if d.Reason.Kind != ReasonSafetyCheck {
 		t.Fatalf("test misconfigured: expected safety check, got %v", d.Reason.Kind)

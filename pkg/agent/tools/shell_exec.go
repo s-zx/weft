@@ -50,22 +50,25 @@ type shellExecOutput struct {
 	Background   bool   `json:"background,omitempty"`
 }
 
-// ShellExec creates a visible cmd-block in the user's tab, runs the command,
-// waits for completion, and returns the exit code plus a tail of the output.
-// This is the Crest-native differentiator: agent shell actions are first-class
-// blocks the user can observe and interact with, not hidden subprocesses.
+// ShellExec runs a shell command. Default mode is HEADLESS — output is
+// captured and returned to the agent, no terminal block opens, no user
+// prompt. For long-running tasks (background:true) a hidden cmd-block
+// is created so the user can opt in to watch it live via the "Open
+// block" affordance on the tool-use card; the agent doesn't wait for
+// user input either way.
 func ShellExec(tabID, defaultBlockID, defaultCwd, defaultConnection string, approval func(any) string) uctypes.ToolDefinition {
 	return uctypes.ToolDefinition{
 		Name:        "shell_exec",
 		DisplayName: "Shell Execute",
-		Description: "Run a shell command in a new visible terminal block. The command output is visible to the user in real-time. Returns exit code and a tail of stdout. If output is truncated, the full output is saved to a spillover log file whose path is returned — use `read_text_file` on it to access the full output.",
+		Description: "Run a shell command. By default runs headless and returns stdout/stderr. Pass background:true for long-running processes (dev servers, watchers) — the command runs detached and the user can attach a viewer block on demand. If output is truncated, the full output is saved to a spillover log file whose path is returned — use `read_text_file` on it to access the full output.",
 		ToolLogName: "agent:shell_exec",
-		Prompt: `shell_exec: Runs a shell command in a new visible terminal block.
+		Prompt: `shell_exec: Runs a shell command. Default is HEADLESS — output is captured and returned to you, no terminal block opens, no user prompt.
+- Set "background": true for processes that don't terminate on their own: dev servers (npm run dev, vite), watchers, file servers, anything you want to keep running while the agent moves on. Returns immediately with a block_id; the user can click "Open block" in the tool-use card to watch it.
+- For long but FINITE commands (npm install, pytest, cargo build): just call shell_exec normally — headless captures the output and the agent continues. Don't use background just because something takes a while; reserve it for processes that genuinely keep running.
 - Avoid cat/head/tail/sed/awk/echo for file ops — use read_text_file, edit_text_file, write_text_file, or search instead. They round-trip less and the diff is reviewable.
 - Quote paths that contain spaces. Prefer absolute paths or rely on the agent's cwd; don't "cd <dir> && cmd" unless cd is explicitly required.
 - Chain dependent commands with && so a failure stops the chain. Use ; only when later commands should run regardless of failure. Avoid newlines inside the cmd string.
 - An exit code of 127 means "command not found" — don't retry the same command after a 127. Check what's actually installed first (e.g. shell_exec "command -v <name>").
-- Only one shell_exec runs at a time per session. Don't spawn long-running daemons here — use create_block for those.
 - Never bypass safety checks like --no-verify, --force, --no-gpg-sign unless the user explicitly asked for it.`,
 		InputSchema: map[string]any{
 			"type": "object",
@@ -93,7 +96,7 @@ func ShellExec(tabID, defaultBlockID, defaultCwd, defaultConnection string, appr
 				"background": map[string]any{
 					"type":        "boolean",
 					"default":     false,
-					"description": "Run in the background. Returns immediately with the block_id without waiting for completion. Use for long-running processes like dev servers, watchers, or builds you want to monitor separately.",
+					"description": "Run in the background. Returns immediately with the block_id without waiting for completion. The block is hidden by default; the user can attach a viewer via the 'Open block' button on the tool-use card.",
 				},
 			},
 			"required":             []string{"cmd"},
@@ -135,7 +138,11 @@ func ShellExec(tabID, defaultBlockID, defaultCwd, defaultConnection string, appr
 			if err != nil {
 				return nil, err
 			}
-			if tabID == "" {
+			// Default + finite commands run headless: output captured,
+			// returned to agent, no UI block. Background commands get a
+			// hidden cmd-block (process runs but block isn't laid out
+			// in the tab) so the user can opt in via "Open block".
+			if !parsed.Background || tabID == "" {
 				return runHeadlessShell(parsed, defaultCwd)
 			}
 			out, err := runShellExec(context.Background(), parsed, tabID, defaultBlockID, defaultCwd, defaultConnection)
@@ -144,6 +151,10 @@ func ShellExec(tabID, defaultBlockID, defaultCwd, defaultConnection string, appr
 			}
 			if toolUseData != nil {
 				toolUseData.BlockId = out.BlockID
+				// Background runs created the block but didn't put it
+				// in the layout. The FE uses BlockHidden to render the
+				// "Open block" button.
+				toolUseData.BlockHidden = parsed.Background
 			}
 			return out, nil
 		},
@@ -199,6 +210,14 @@ func runShellExec(ctx context.Context, params *shellExecInput, tabID, defaultBlo
 	if params.CloseOnExit {
 		meta[waveobj.MetaKey_CmdCloseOnExit] = true
 	}
+	// Hidden background blocks self-delete on process exit so a
+	// "fire-and-forget" run that the user never opens doesn't leave
+	// orphan rows in the DB. ShowBlockCommand flips this back to
+	// false when the user clicks "Open block", so an opened block
+	// keeps its post-mortem output visible.
+	if params.Background {
+		meta[waveobj.MetaKey_CmdCloseOnExit] = true
+	}
 
 	blockDef := &waveobj.BlockDef{Meta: meta}
 	block, err := wcore.CreateBlock(ctx, tabID, blockDef, nil)
@@ -207,20 +226,27 @@ func runShellExec(ctx context.Context, params *shellExecInput, tabID, defaultBlo
 	}
 	blockID := block.OID
 
-	layoutAction := &waveobj.LayoutActionData{
-		ActionType:    wcore.LayoutActionDataType_SplitVertical,
-		BlockId:       blockID,
-		TargetBlockId: defaultBlockID,
-		Position:      "after",
-	}
-	if defaultBlockID == "" {
-		layoutAction = &waveobj.LayoutActionData{
-			ActionType: wcore.LayoutActionDataType_Insert,
-			BlockId:    blockID,
+	// Background runs create the block but don't put it in the layout —
+	// the process runs invisibly and the user opts in via the "Open
+	// block" affordance on the tool-use card. Foreground (synchronous)
+	// runs still use the layout because the agent waits anyway and the
+	// user expects to see the output as it streams.
+	if !params.Background {
+		layoutAction := &waveobj.LayoutActionData{
+			ActionType:    wcore.LayoutActionDataType_SplitVertical,
+			BlockId:       blockID,
+			TargetBlockId: defaultBlockID,
+			Position:      "after",
 		}
-	}
-	if err := wcore.QueueLayoutActionForTab(ctx, tabID, *layoutAction); err != nil {
-		return nil, fmt.Errorf("queue layout: %w", err)
+		if defaultBlockID == "" {
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType: wcore.LayoutActionDataType_Insert,
+				BlockId:    blockID,
+			}
+		}
+		if err := wcore.QueueLayoutActionForTab(ctx, tabID, *layoutAction); err != nil {
+			return nil, fmt.Errorf("queue layout: %w", err)
+		}
 	}
 	wps.Broker.SendUpdateEvents(waveobj.ContextGetUpdatesRtn(ctx))
 
@@ -232,7 +258,7 @@ func runShellExec(ctx context.Context, params *shellExecInput, tabID, defaultBlo
 		return &shellExecOutput{
 			BlockID:    blockID,
 			ExitCode:   -1,
-			StdoutTail: "started in background — process is still running. Use get_scrollback to inspect output later. There is currently no tool to kill it from another tool call; the user can close the block.",
+			StdoutTail: "started in background — process is running headless. The user can click 'Open block' on the tool-use card to attach a viewer. Use get_scrollback to inspect output programmatically.",
 			Background: true,
 		}, nil
 	}

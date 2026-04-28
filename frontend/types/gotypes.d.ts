@@ -567,6 +567,18 @@ declare global {
         truncated?: boolean;
     };
 
+    // wshrpc.CommandListProviderModelsData
+    type CommandListProviderModelsData = {
+        apitype: string;
+        baseurl?: string;
+        apitoken?: string;
+    };
+
+    // wshrpc.CommandListProviderModelsRtnData
+    type CommandListProviderModelsRtnData = {
+        models: ProviderModelInfo[];
+    };
+
     // wshrpc.CommandMakeDraftFromLocalData
     type CommandMakeDraftFromLocalData = {
         localappid: string;
@@ -745,6 +757,15 @@ declare global {
         oref: ORef;
         data: ObjRTInfo;
         delete?: boolean;
+    };
+
+    // wshrpc.CommandShowBlockData
+    type CommandShowBlockData = {
+        blockid: string;
+        tabid: string;
+        targetblockid?: string;
+        targetaction?: string;
+        focused?: boolean;
     };
 
     // wshrpc.CommandStartBuilderData
@@ -1438,6 +1459,14 @@ declare global {
         memfree?: number;
         numcpu?: number;
         cpusum?: number;
+    };
+
+    // wshrpc.ProviderModelInfo
+    type ProviderModelInfo = {
+        id: string;
+        name?: string;
+        description?: string;
+        context?: number;
     };
 
     // wshrpc.RemoteInfo

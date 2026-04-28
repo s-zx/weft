@@ -38,6 +38,11 @@ func WebFetch(approval func(any) string) uctypes.ToolDefinition {
 		DisplayName: "Fetch Web Page",
 		Description: "Fetch a URL and return the text content. Useful for reading documentation, checking APIs, or retrieving web page content. Returns extracted text (HTML tags stripped). Maximum 100KB of text returned.",
 		ToolLogName: "agent:web_fetch",
+		Prompt: `web_fetch: Fetches a URL and returns its text (HTML stripped).
+- Must be http:// or https://. Private/loopback/link-local addresses are blocked (SSRF guard).
+- Output is capped at 100KB. For very long pages, fetch and then immediately summarize — don't quote the whole body back to the user.
+- Use for documentation, API references, release notes. NOT a generic "search the web" — you must already know the URL.
+- If the user gave you a link, fetch it before guessing. Don't paraphrase from training data when the source is one fetch away.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

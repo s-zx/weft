@@ -630,6 +630,12 @@ export class RpcApiType {
         return client.wshRpcCall("listalleditableapps", null, opts);
     }
 
+    // command "listprovidermodels" [call]
+    ListProviderModelsCommand(client: WshClient, data: CommandListProviderModelsData, opts?: RpcOpts): Promise<CommandListProviderModelsRtnData> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "listprovidermodels", data, opts);
+        return client.wshRpcCall("listprovidermodels", data, opts);
+    }
+
     // command "macosversion" [call]
     MacOSVersionCommand(client: WshClient, opts?: RpcOpts): Promise<string> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "macosversion", null, opts);
@@ -904,6 +910,12 @@ export class RpcApiType {
     SetVarCommand(client: WshClient, data: CommandVarData, opts?: RpcOpts): Promise<void> {
         if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "setvar", data, opts);
         return client.wshRpcCall("setvar", data, opts);
+    }
+
+    // command "showblock" [call]
+    ShowBlockCommand(client: WshClient, data: CommandShowBlockData, opts?: RpcOpts): Promise<void> {
+        if (this.mockClient) return this.mockClient.mockWshRpcCall(client, "showblock", data, opts);
+        return client.wshRpcCall("showblock", data, opts);
     }
 
     // command "startbuilder" [call]

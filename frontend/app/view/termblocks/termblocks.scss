@@ -303,11 +303,13 @@
     margin-left: 2px;
 }
 
-// Input row — no border-top, no prompt symbol; lives inside the card
+// Input row — no border-top, no prompt symbol; lives inside the card.
+// align-items: flex-start so the textarea can grow downward while the
+// row's other children (if any are added later) stay top-aligned.
 .termblocks-input-row {
     flex: 0 0 auto;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     padding: 4px 12px 10px;
 }
 
@@ -315,27 +317,32 @@
     flex: 1 1 auto;
     position: relative;
     min-width: 0;
-    display: flex;
-    align-items: center;
+    display: block;
 }
 
-// Input itself renders transparent text so the user only sees the
-// overlay's colored tokens.  The caret stays visible because it
-// ignores `color` (on modern browsers) — we still force
-// caret-color to a readable accent just in case.
+// Plain visible textarea — no overlay, no transparent-text trick.
+// Auto-grow is driven from JS (height set against scrollHeight) and
+// capped at max-height; beyond that the textarea scrolls natively.
+// Native wrapping handles caret/IME/selection out of the box, which
+// is why we dropped the colored-token overlay (it was the source of
+// every multi-line drift bug).
 .termblocks-input {
     width: 100%;
     background: transparent;
     border: none;
     outline: none;
-    color: transparent;
+    color: var(--tb-tok-text);
     caret-color: var(--tb-accent);
     font-family: ui-monospace, Menlo, Consolas, monospace;
     font-size: 13px;
     line-height: 1.4;
     padding: 4px 0;
-    position: relative;
-    z-index: 1;
+    resize: none;
+    overflow-y: auto;
+    max-height: 160px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    display: block;
 
     &::selection {
         background: rgba(184, 242, 192, 0.25);
@@ -343,58 +350,10 @@
     }
 }
 
-// Highlight overlay shares font metrics with the input and sits underneath
-// it.  Tokens render in their own colors; the ghost suffix extends past
-// the typed text.
-.termblocks-input-highlight {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    display: flex;
-    align-items: center;
-    font-family: ui-monospace, Menlo, Consolas, monospace;
-    font-size: 13px;
-    line-height: 1.4;
-    padding: 4px 0;
-    white-space: pre;
-    overflow: hidden;
-    z-index: 0;
-    color: rgba(255, 255, 255, 0.9);
-}
-
-.tok-cmd {
-    color: var(--tb-tok-cmd);
-    font-weight: 600;
-}
-.tok-flag {
-    color: var(--tb-tok-flag);
-}
-.tok-string {
-    color: var(--tb-tok-string);
-}
-.tok-var {
-    color: var(--tb-tok-var);
-}
-.tok-comment {
-    color: var(--tb-tok-comment);
-    font-style: italic;
-}
-.tok-op {
-    color: var(--tb-tok-op);
-    font-weight: 600;
-}
-.tok-path {
-    color: var(--tb-tok-path);
-    text-decoration: underline;
-    text-decoration-color: rgba(230, 230, 230, 0.2);
-    text-underline-offset: 3px;
-}
-.tok-text {
-    color: var(--tb-tok-text);
-}
-.tok-ghost {
-    color: var(--tb-tok-ghost);
-}
+// (removed: .termblocks-input-highlight overlay and .tok-* token
+// styles. The input is a plain textarea now; shell-syntax coloring
+// while typing is gone — the same coloring still applies after the
+// command runs and renders inside the cmd-block.)
 
 
 // Clickable chip cursor

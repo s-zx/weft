@@ -167,6 +167,8 @@ type WshRpcInterface interface {
 	WaveAIToolApproveCommand(ctx context.Context, data CommandWaveAIToolApproveData) error
 	WaveAIAddContextCommand(ctx context.Context, data CommandWaveAIAddContextData) error
 	WaveAIGetToolDiffCommand(ctx context.Context, data CommandWaveAIGetToolDiffData) (*CommandWaveAIGetToolDiffRtnData, error)
+	ListProviderModelsCommand(ctx context.Context, data CommandListProviderModelsData) (*CommandListProviderModelsRtnData, error)
+	ShowBlockCommand(ctx context.Context, data CommandShowBlockData) error
 
 	// screenshot
 	CaptureBlockScreenshotCommand(ctx context.Context, data CommandCaptureBlockScreenshotData) (string, error)
@@ -607,6 +609,45 @@ type CommandWaveAIGetToolDiffData struct {
 type CommandWaveAIGetToolDiffRtnData struct {
 	OriginalContents64 string `json:"originalcontents64"`
 	ModifiedContents64 string `json:"modifiedcontents64"`
+}
+
+// CommandListProviderModelsData lists models a provider exposes via its
+// /models endpoint. The request carries the user's *current* (unsaved)
+// inputs from the AI Provider settings UI so they can preview a model
+// list before persisting the form.
+type CommandListProviderModelsData struct {
+	APIType  string `json:"apitype"`            // "openai-chat" / "anthropic-messages" / "google-gemini"
+	BaseURL  string `json:"baseurl,omitempty"`  // chat-completions URL; we strip the suffix to find /models
+	APIToken string `json:"apitoken,omitempty"` // bearer / x-api-key / google query-string key
+}
+
+// ProviderModelInfo is the shape we return to the FE — a slim, normalized
+// view of the per-provider /models response. Most providers carry more
+// fields (pricing, features) but the FE picker only needs id + name +
+// context size for display and selection.
+type ProviderModelInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name,omitempty"`
+	Description string `json:"description,omitempty"`
+	Context     int    `json:"context,omitempty"`
+}
+
+type CommandListProviderModelsRtnData struct {
+	Models []ProviderModelInfo `json:"models"`
+}
+
+// CommandShowBlockData attaches an existing (already-created, possibly
+// hidden) block into a tab's layout. Used by background shell_exec to
+// let the user opt in to viewing a running process: the block is
+// created with the process running, but layout is deferred until the
+// user clicks "Open block" on the tool-use card. TabId is required;
+// TargetBlockId is optional (defaults to a top-level insert).
+type CommandShowBlockData struct {
+	BlockId       string `json:"blockid"`
+	TabId         string `json:"tabid"`
+	TargetBlockId string `json:"targetblockid,omitempty"`
+	TargetAction  string `json:"targetaction,omitempty"` // splitdown / splitright / splitup / splitleft / insert
+	Focused       bool   `json:"focused,omitempty"`
 }
 
 type CommandCaptureBlockScreenshotData struct {

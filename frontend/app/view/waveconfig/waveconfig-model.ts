@@ -84,10 +84,9 @@ function makeConfigFiles(isWindows: boolean): ConfigFile[] {
             name: "AI Provider",
             path: "waveai.json",
             language: "json",
-            description: "Provider, API key, and model",
             docsUrl: "https://docs.waveterm.dev/waveai-modes",
             validator: validateWaveAiJson,
-            hasJsonView: true,
+            hasJsonView: false,
             visualComponent: WaveAIVisualContent,
         },
         {

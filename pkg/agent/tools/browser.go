@@ -65,6 +65,10 @@ func BrowserNavigate(tabID string, approval func(any) string) uctypes.ToolDefini
 		DisplayName: "Navigate Web Block",
 		Description: "Navigate a web browser block to a new URL. The block must be a web block (view type 'web').",
 		ToolLogName: "browser:navigate",
+		Prompt: `browser.navigate: Navigates an existing web block to a new URL.
+- The block must already exist as a web block — create one with create_block view="web" first if needed.
+- "block_id" accepts a prefix; the agent resolves it to the full ID.
+- Use browser.* family ONLY when the user is interacting with a real web page (forms, login flows, JS-rendered content). For static content / docs, web_fetch is faster and cheaper.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -124,6 +128,10 @@ func BrowserReadText(tabID string, approval func(any) string) uctypes.ToolDefini
 		DisplayName: "Read Web Page Text",
 		Description: "Read the text content of a web block's page. Optionally specify a CSS selector to read a specific element. Returns the inner HTML text.",
 		ToolLogName: "browser:readtext",
+		Prompt: `browser.read_text: Reads inner text from a web block's rendered DOM.
+- Use after the page has loaded — JS-rendered content is fully resolved (unlike web_fetch which sees only the initial HTML).
+- "selector" defaults to "body". Provide a specific selector to scope output (e.g. "main", "#article", ".post-body") so you don't pay for full-page tokens.
+- For static documentation pages, prefer web_fetch — it doesn't require a live web block.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -194,6 +202,10 @@ func BrowserClick(tabID string, approval func(any) string) uctypes.ToolDefinitio
 		DisplayName: "Click Web Element",
 		Description: "Click an element in a web block's page by CSS selector.",
 		ToolLogName: "browser:click",
+		Prompt: `browser.click: Clicks an element in a web block by CSS selector.
+- Provide a selector specific enough to match exactly one element. Vague selectors that match many elements click the first one (which may not be what you want).
+- After clicking, wait/read again before deciding the next step — the click may have navigated, opened a modal, or changed the DOM.
+- Do NOT click anything that triggers an alert / confirm / prompt dialog — modal dialogs block the page and the agent loses control. Read the page first; if you see a button that opens a confirm, ask the user.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -256,6 +268,10 @@ func BrowserScreenshot(tabID string, approval func(any) string) uctypes.ToolDefi
 		Description:      "Capture a screenshot of a web block's page content and return it as a base64-encoded PNG.",
 		ToolLogName:      "browser:screenshot",
 		RequiredCapabilities: []string{uctypes.AICapabilityImages},
+		Prompt: `browser.screenshot: Captures a PNG of the current web block.
+- Only available on multimodal models (the tool registration enforces this).
+- Use when you need to SEE the rendered layout — visual regressions, confirming a UI bug the user described, finding an element you can't easily select.
+- For getting text out of a page, prefer browser.read_text — it's cheaper than image tokens.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

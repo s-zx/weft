@@ -41,6 +41,12 @@ func SpawnTask(cfg SpawnTaskConfig, approval func(any) string) uctypes.ToolDefin
 		DisplayName: "Spawn Sub-Task",
 		Description: "Delegate a scoped sub-task to a child agent with isolated conversation context. Returns the sub-agent's final response text. Use for independent sub-tasks like 'read and summarize this file' or 'find all TODO comments'. Multiple spawn_task calls in a single response run in parallel.",
 		ToolLogName: "agent:spawn_task",
+		Prompt: `spawn_task: Delegates an isolated sub-task to a child agent.
+- Use when a sub-task would otherwise dump a large amount of intermediate context into your conversation — e.g. "read these 20 files and summarize", "find all TODOs across the repo", "scan the dependencies and list outdated ones". The child runs the search/reads/etc. and returns just the final answer.
+- The child gets ZERO context from this conversation. Write the "task" prompt as if briefing a stranger — include relevant file paths, what to look for, and what to return.
+- Mode: "ask" for read-only research (default), "do" for tasks that actually modify files. Don't use "do" for anything destructive without explicit user authorization.
+- Multiple spawn_task calls in one response run in parallel — fan out for independent work, but don't fan out for steps that depend on each other.
+- Use only when the cost of inlining the work would clearly exceed the cost of an extra round-trip. For a single read or grep, just do it directly.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

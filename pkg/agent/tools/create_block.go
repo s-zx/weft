@@ -42,6 +42,12 @@ func CreateBlock(tabID, defaultTargetBlockID, defaultConnection string, approval
 		DisplayName: "Create Block",
 		Description: "Open a new block on the current tab. Supports view=\"term\" (new terminal), view=\"preview\" (file preview), view=\"web\" (browser). Positions itself next to the agent's terminal by default via splitdown.",
 		ToolLogName: "agent:create_block",
+		Prompt: `create_block: Opens a new block (terminal / file preview / web) next to the agent's terminal.
+- "view": "term" for an interactive shell (or with cmd to run a long-lived process — daemons, dev servers), "preview" for a file (use absolute path), "web" for a URL.
+- Use create_block for processes that should keep running (npm run dev, log tail, etc.). Use shell_exec for one-shot commands you need the output of.
+- For "term" + "cmd": that command becomes the block's controller — it shows in the UI and the user can interact with it. Use this for things the user should watch.
+- "target_action" defaults to "splitdown" (new block appears below the agent's terminal). Change only when layout matters.
+- Returns a block_id you can pass to focus_block, browser.*, etc.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

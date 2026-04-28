@@ -237,6 +237,11 @@ type UIMessageDataToolUse struct {
 	ErrorMessage        string `json:"errormessage,omitempty"`
 	Approval            string `json:"approval,omitempty"`
 	BlockId             string `json:"blockid,omitempty"`
+	// BlockHidden = true means the block exists but isn't laid out in
+	// the user's tab. The FE renders an "Open block" affordance on the
+	// tool-use card so the user can attach a viewer on demand. Today
+	// only background shell_exec produces this state.
+	BlockHidden         bool   `json:"blockhidden,omitempty"`
 	WriteBackupFileName string `json:"writebackupfilename,omitempty"`
 	InputFileName       string `json:"inputfilename,omitempty"`
 	OriginalContent     string `json:"originalcontent,omitempty"`

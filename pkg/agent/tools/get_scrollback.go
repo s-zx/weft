@@ -15,5 +15,10 @@ func GetScrollback(tabID string, approval func(any) string) uctypes.ToolDefiniti
 	t.ToolLogName = "agent:get_scrollback"
 	t.ToolApproval = approval
 	t.Parallel = true
+	t.Prompt = `get_scrollback: Reads the recent terminal output of a block.
+- Use when you need the actual output of something the user just ran (or that you ran via shell_exec) — exit codes alone aren't enough.
+- For structured "what commands ran here" data (cmd, exit code, duration), prefer cmd_history — it's cheaper than parsing scrollback.
+- Output can be large; ask for the smallest line window that answers your question.
+- Parallel-safe.`
 	return t
 }

@@ -124,13 +124,20 @@ func (h *SSEHandlerCh) Context() context.Context {
 	return h.ctx
 }
 
-// SetupSSE configures the response headers and starts the writer goroutine
+// SetupSSE configures the response headers and starts the writer goroutine.
+// Idempotent: a second call after a successful first one is a no-op. This
+// lets the HTTP handler set up SSE up front (so errors from any layer can
+// be surfaced as error chunks) while still allowing backends to call
+// SetupSSE in their happy paths without blowing up.
 func (h *SSEHandlerCh) SetupSSE() error {
 	h.lock.Lock()
 	defer h.lock.Unlock()
 
 	if h.closed {
 		return fmt.Errorf("SSE handler is closed")
+	}
+	if h.initialized {
+		return nil
 	}
 
 	h.initialized = true

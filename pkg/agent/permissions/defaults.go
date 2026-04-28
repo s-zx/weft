@@ -67,20 +67,21 @@ func BuiltinRules() []Rule {
 		{"shell_exec(prefix:sudo)", RuleDeny},
 		{"shell_exec(prefix:rm -rf /)", RuleDeny},
 		{"shell_exec(prefix:rm -rf ~)", RuleDeny},
-		// File writes to obvious-secret paths. These are also bypass-
-		// immune (would prompt anyway under acceptEdits/bypass), but
-		// having them as deny rules means the model sees a clean
-		// "denied" rather than waiting on a prompt that the user has
-		// to dismiss every time.
-		{"edit_text_file(**/.env)", RuleDeny},
-		{"edit_text_file(**/.env.*)", RuleDeny},
-		{"edit_text_file(**/.ssh/**)", RuleDeny},
-		{"write_text_file(**/.env)", RuleDeny},
-		{"write_text_file(**/.env.*)", RuleDeny},
-		{"write_text_file(**/.ssh/**)", RuleDeny},
-		{"multi_edit(**/.env)", RuleDeny},
-		{"multi_edit(**/.env.*)", RuleDeny},
-		{"multi_edit(**/.ssh/**)", RuleDeny},
+		// File writes to obvious-secret paths. Ask (not Deny) so the
+		// model gets a clear "user is being prompted" signal rather
+		// than a cryptic refusal — and so the user can grant the
+		// write in the rare case they actually want it. Bypass
+		// posture skips these (full-trust mode); acceptEdits and
+		// default both prompt.
+		{"edit_text_file(**/.env)", RuleAsk},
+		{"edit_text_file(**/.env.*)", RuleAsk},
+		{"edit_text_file(**/.ssh/**)", RuleAsk},
+		{"write_text_file(**/.env)", RuleAsk},
+		{"write_text_file(**/.env.*)", RuleAsk},
+		{"write_text_file(**/.ssh/**)", RuleAsk},
+		{"multi_edit(**/.env)", RuleAsk},
+		{"multi_edit(**/.env.*)", RuleAsk},
+		{"multi_edit(**/.ssh/**)", RuleAsk},
 	}
 
 	rules := make([]Rule, 0, len(specs))

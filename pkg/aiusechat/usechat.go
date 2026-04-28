@@ -937,7 +937,8 @@ stepLoop:
 			}
 		}
 		if chatOpts.MaxSteps > 0 && metrics.RequestCount >= chatOpts.MaxSteps {
-			_ = sseHandler.AiMsgError(fmt.Sprintf("Step budget exhausted (%d/%d steps)", metrics.RequestCount, chatOpts.MaxSteps))
+			budgetMsg := fmt.Sprintf("Step budget exhausted (%d/%d steps)", metrics.RequestCount, chatOpts.MaxSteps)
+			_ = sseHandler.AiMsgError(budgetMsg)
 			_ = sseHandler.AiMsgFinish("step_budget", nil)
 			metrics.HadError = true
 			break
@@ -1024,6 +1025,8 @@ stepLoop:
 			// turn so the caller sees a wrapped error, otherwise FailFatal).
 			if firstStep {
 				metrics.HadError = true
+				_ = sseHandler.AiMsgError(err.Error())
+				_ = sseHandler.AiMsgFinish("", nil)
 				return metrics, fmt.Errorf("failed to stream %s chat: %w", chatOpts.Config.APIType, err)
 			}
 			metrics.HadError = true
@@ -1032,6 +1035,8 @@ stepLoop:
 			break stepLoop
 		case LoopActionFailFirstStep:
 			metrics.HadError = true
+			_ = sseHandler.AiMsgError(err.Error())
+			_ = sseHandler.AiMsgFinish("", nil)
 			return metrics, fmt.Errorf("failed to stream %s chat: %w", chatOpts.Config.APIType, err)
 		case LoopActionFailFatal:
 			metrics.HadError = true

@@ -1321,6 +1321,99 @@ func (ws *WshServer) WaveAIGetToolDiffCommand(ctx context.Context, data wshrpc.C
 	}, nil
 }
 
+func (ws *WshServer) ListProviderModelsCommand(ctx context.Context, data wshrpc.CommandListProviderModelsData) (*wshrpc.CommandListProviderModelsRtnData, error) {
+	models, err := aiusechat.ListProviderModels(ctx, data.APIType, data.BaseURL, data.APIToken)
+	if err != nil {
+		return nil, err
+	}
+	return &wshrpc.CommandListProviderModelsRtnData{Models: models}, nil
+}
+
+func (ws *WshServer) ShowBlockCommand(ctx context.Context, data wshrpc.CommandShowBlockData) error {
+	if data.BlockId == "" {
+		return fmt.Errorf("blockid is required")
+	}
+	if data.TabId == "" {
+		return fmt.Errorf("tabid is required")
+	}
+	ctx = waveobj.ContextWithUpdates(ctx)
+
+	// Validate the block still exists. If the user previously
+	// opened it and then closed it, DeleteBlockCommand will have
+	// removed the row entirely — laying out a missing blockId
+	// produces an empty placeholder leaf, which is the bug we hit
+	// before this guard. Fail fast so the FE can show a "dismissed"
+	// state instead.
+	block, err := wstore.DBGet[*waveobj.Block](ctx, data.BlockId)
+	if err != nil {
+		return fmt.Errorf("error checking block: %w", err)
+	}
+	if block == nil {
+		return fmt.Errorf("block %s no longer exists", data.BlockId)
+	}
+
+	// Once a background block is shown to the user, drop the
+	// auto-self-delete-on-exit flag — opened blocks should keep
+	// their post-mortem output around for the user to read. The
+	// flag was set by shell_exec to GC truly fire-and-forget runs
+	// the user never looked at.
+	_ = wstore.UpdateObjectMeta(ctx, waveobj.MakeORef(waveobj.OType_Block, data.BlockId), waveobj.MetaMapType{
+		waveobj.MetaKey_CmdCloseOnExit: false,
+	}, false)
+
+	var layoutAction *waveobj.LayoutActionData
+	if data.TargetBlockId != "" {
+		switch data.TargetAction {
+		case "splitright":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitHorizontal,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "after",
+				Focused:       data.Focused,
+			}
+		case "splitleft":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitHorizontal,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "before",
+				Focused:       data.Focused,
+			}
+		case "splitup":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitVertical,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "before",
+				Focused:       data.Focused,
+			}
+		case "", "splitdown":
+			layoutAction = &waveobj.LayoutActionData{
+				ActionType:    wcore.LayoutActionDataType_SplitVertical,
+				BlockId:       data.BlockId,
+				TargetBlockId: data.TargetBlockId,
+				Position:      "after",
+				Focused:       data.Focused,
+			}
+		default:
+			return fmt.Errorf("unsupported target_action %q", data.TargetAction)
+		}
+	} else {
+		layoutAction = &waveobj.LayoutActionData{
+			ActionType: wcore.LayoutActionDataType_Insert,
+			BlockId:    data.BlockId,
+			Focused:    data.Focused,
+		}
+	}
+
+	if err := wcore.QueueLayoutActionForTab(ctx, data.TabId, *layoutAction); err != nil {
+		return fmt.Errorf("queue layout action: %w", err)
+	}
+	wps.Broker.SendUpdateEvents(waveobj.ContextGetUpdatesRtn(ctx))
+	return nil
+}
+
 var wshActivityRe = regexp.MustCompile(`^[a-z:#]+$`)
 
 func (ws *WshServer) WshActivityCommand(ctx context.Context, data map[string]int) error {

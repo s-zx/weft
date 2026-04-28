@@ -27,6 +27,10 @@ func FocusBlock(tabID string, approval func(any) string) uctypes.ToolDefinition 
 		DisplayName: "Focus Block",
 		Description: "Focus a specific block on the current tab.",
 		ToolLogName: "agent:focus_block",
+		Prompt: `focus_block: Sets keyboard focus to a specific block.
+- Use when the user should immediately interact with something you opened — e.g. after create_block opens a terminal that needs login input.
+- Don't grab focus speculatively. The user's current focus is theirs; only steal it when there's a clear reason.
+- Cheap, no side effects beyond focus.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

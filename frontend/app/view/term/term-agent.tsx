@@ -8,6 +8,8 @@ import { globalStore } from "@/app/store/jotaiStore";
 import { RpcApi } from "@/app/store/wshclientapi";
 import { TabRpcClient } from "@/app/store/wshrpcutil";
 import { getWebServerEndpoint } from "@/util/endpoints";
+import { getLayoutModelForStaticTab } from "@/layout/lib/layoutModelHooks";
+import { makeORef, useWaveObjectValue } from "@/app/store/wos";
 import { useChat } from "@ai-sdk/react";
 import { DefaultChatTransport } from "ai";
 import * as jotai from "jotai";
@@ -22,13 +24,14 @@ export type TermAgentModel = {
     termAgentVisible: jotai.PrimitiveAtom<boolean>;
     termAgentComposerOpen: jotai.PrimitiveAtom<boolean>;
     termAgentInput: jotai.PrimitiveAtom<string>;
-    termAgentError: jotai.PrimitiveAtom<string | null>;
+    termAgentNotice: jotai.PrimitiveAtom<string | null>;
     termAgentChatId: jotai.PrimitiveAtom<string>;
-    termAgentAgentMode: jotai.Atom<"ask" | "plan" | "do">;
+    // Permissions posture (per-chat). Cycled via Shift+Tab on the
+    // overlay or click on the posture pill. Defaults to acceptEdits;
+    // user-facing values are "default" / "acceptEdits" / "bypass".
+    termAgentPosture: jotai.PrimitiveAtom<string>;
     getAndClearTermAgentMessage(): any;
-    getTermAgentMode(): string;
     getTermAgentModelOverride(): string;
-    getAndClearTermAgentPendingMode(): string;
     getAndClearTermAgentPendingContext(): any;
     getAndClearTermAgentPlanPath(): string;
     // getTermAgentCwd returns the current cwd for permission persistence
@@ -45,7 +48,7 @@ export type TermAgentModel = {
     ): void;
     clearTermAgentSession(): void;
     hideTermAgentOverlay(): void;
-    setTermAgentError(message: string | null): void;
+    setTermAgentNotice(message: string | null): void;
     submitTermAgentPrompt(): Promise<void>;
     closeTermAgentComposer(): void;
 };
@@ -173,9 +176,15 @@ TermAgentInlineDiff.displayName = "TermAgentInlineDiff";
 type TermAgentApprovalContextValue = {
     chatId: string;
     getCwd: () => string | undefined;
+    // tabId + anchorBlockId let tool-use cards trigger layout actions
+    // (currently used by the "Open block" affordance for hidden
+    // background-shell blocks). anchorBlockId is the agent's own
+    // terminal block — we splitdown off it.
+    tabId: string;
+    anchorBlockId: string;
 };
 
-const TermAgentApprovalContext = createContext<TermAgentApprovalContextValue | null>(null);
+export const TermAgentApprovalContext = createContext<TermAgentApprovalContextValue | null>(null);
 
 const TermAgentApprovalButtons = memo(
     ({ toolCallId, suggestions }: { toolCallId: string; suggestions?: SuggestedRule[] }) => {
@@ -281,6 +290,75 @@ const TermAgentApprovalButtons = memo(
 
 TermAgentApprovalButtons.displayName = "TermAgentApprovalButtons";
 
+const TermAgentOpenBlockButton = memo(({ blockId }: { blockId: string }) => {
+    const ctx = useContext(TermAgentApprovalContext);
+    const [opening, setOpening] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    // Reflect actual layout state, not local clicked-once state. The
+    // user can close the spawned block and click again to reopen — and
+    // can see at a glance whether the block is currently visible.
+    const layoutModel = useMemo(() => getLayoutModelForStaticTab(), []);
+    const leafs = jotai.useAtomValue(layoutModel.leafs);
+    const isInLayout = useMemo(
+        () => leafs.some((leaf) => leaf?.data?.blockId === blockId),
+        [leafs, blockId]
+    );
+    // Track block existence in the wstore — if the user closes the
+    // block via UI X button, Crest's DeleteBlockCommand removes the
+    // row entirely and the controller process dies. There's no way
+    // to "reopen" a deleted block, so the button needs to flip to a
+    // permanently-dismissed state. value=null after a delete event
+    // arrives via WaveObjUpdate; loading=true on first paint.
+    const [blockObj, blockLoading] = useWaveObjectValue<any>(makeORef("block", blockId));
+    const isDismissed = !blockLoading && blockObj == null;
+    const onClick = async () => {
+        // Defensive double-click / race guard. The button is also
+        // disabled while opening, but isInLayout updates via the
+        // layout atom so during the brief gap between RPC return and
+        // atom propagation the button could re-enable; bail here too.
+        if (opening || isInLayout || isDismissed) return;
+        if (!ctx?.tabId) {
+            setError("no tab context");
+            return;
+        }
+        setOpening(true);
+        setError(null);
+        try {
+            await RpcApi.ShowBlockCommand(TabRpcClient, {
+                blockid: blockId,
+                tabid: ctx.tabId,
+                targetblockid: ctx.anchorBlockId,
+                targetaction: "splitdown",
+                focused: false,
+            });
+        } catch (e: any) {
+            setError(e?.message ?? "failed to open block");
+        } finally {
+            setOpening(false);
+        }
+    };
+    if (isDismissed) {
+        return <span className="text-xs text-zinc-600">Block dismissed</span>;
+    }
+    if (isInLayout) {
+        return <span className="text-xs text-zinc-500">Block open</span>;
+    }
+    return (
+        <div className="flex items-center gap-2">
+            <button
+                type="button"
+                onClick={onClick}
+                disabled={opening}
+                className="px-2 py-1 rounded text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 transition-colors cursor-pointer disabled:opacity-50"
+            >
+                {opening ? "Opening..." : "Open block"}
+            </button>
+            {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
+    );
+});
+TermAgentOpenBlockButton.displayName = "TermAgentOpenBlockButton";
+
 const TermAgentToolUse = memo(({ part, isStreaming }: { part: WaveUIMessagePart; isStreaming: boolean }) => {
     if (part.type !== "data-tooluse") {
         return null;
@@ -294,6 +372,7 @@ const TermAgentToolUse = memo(({ part, isStreaming }: { part: WaveUIMessagePart;
     const toolDesc = toolData?.tooldesc || toolData?.toolname || "Tool call";
     const errorText =
         toolData?.errormessage || (!isStreaming && approval === "needs-approval" ? "Approval timed out." : "");
+    const hasHiddenBlock = !!(toolData?.blockhidden && toolData?.blockid);
 
     return (
         <div className="rounded-lg border border-zinc-700/80 bg-black/20 px-3 py-2 text-sm">
@@ -309,6 +388,7 @@ const TermAgentToolUse = memo(({ part, isStreaming }: { part: WaveUIMessagePart;
                     <div className="truncate text-zinc-100">{toolDesc}</div>
                     <div className="text-xs text-zinc-400">{toolData?.toolname ?? "tool"}</div>
                 </div>
+                {hasHiddenBlock && <TermAgentOpenBlockButton blockId={toolData.blockid!} />}
             </div>
             {toolData?.modifiedcontent != null && (
                 <TermAgentInlineDiff
@@ -425,7 +505,14 @@ const TermAgentMessage = memo(({ message, isStreaming }: { message: WaveUIMessag
 
 TermAgentMessage.displayName = "TermAgentMessage";
 
-export const TermAgentChatProvider = memo(({ model }: { model: TermAgentModel }) => {
+// useTermAgentChat is the shared chat-setup hook used by both
+// TermAgentChatProvider (termblocks view, returns null and only
+// registers callbacks on the model) and TermAgentOverlay (single-
+// term view, owns its own chat AND renders the UI). The previous
+// architecture had only ChatProvider call useChat, leaving the
+// Overlay's `messages`/`status` references unbound — a long-standing
+// bug that this hook closes by giving each surface its own chat.
+function useTermAgentChat(model: TermAgentModel) {
     const transport = useMemo(
         () =>
             new DefaultChatTransport({
@@ -435,12 +522,14 @@ export const TermAgentChatProvider = memo(({ model }: { model: TermAgentModel })
                         body: {
                             msg: model.getAndClearTermAgentMessage(),
                             chatid: globalStore.get(model.termAgentChatId),
-                            aimode: model.getTermAgentMode(),
                             modeloverride: model.getTermAgentModelOverride(),
                             planpath: model.getAndClearTermAgentPlanPath(),
                             tabid: model.tabModel.tabId,
                             blockid: model.blockId,
-                            mode: model.getAndClearTermAgentPendingMode(),
+                            // Permissions v2: no more legacy `mode` field.
+                            // The backend defaults absent mode to "do".
+                            // Posture is the user-facing strictness axis.
+                            permission_posture: globalStore.get(model.termAgentPosture),
                             context: model.getAndClearTermAgentPendingContext(),
                         },
                     };
@@ -449,40 +538,129 @@ export const TermAgentChatProvider = memo(({ model }: { model: TermAgentModel })
         [model]
     );
 
-    const { messages, sendMessage, status, setMessages, stop } = useChat<WaveUIMessage>({
+    const chat = useChat<WaveUIMessage>({
         transport,
         onError: (error) => {
             console.error("terminal agent error", error);
-            model.setTermAgentError(error.message || "Terminal agent request failed.");
+            const msg = error.message || "Terminal agent request failed.";
+            // Prefer pushing to the conversation timeline when the
+            // model supports it (termblocks view) — model failures are
+            // turn-level events that belong next to the user's
+            // triggering message, not in the input-row error bar.
+            // Falls back to the old setter for older code paths
+            // (single-term overlay) that don't have a chat-error
+            // atom yet.
+            const m = model as any;
+            if (typeof m.addTermAgentChatError === "function") {
+                m.addTermAgentChatError(msg);
+            } else {
+                model.setTermAgentNotice(msg);
+            }
         },
     });
 
     useEffect(() => {
-        model.registerTermAgentChat(sendMessage, setMessages, status, stop);
-    }, [model, sendMessage, setMessages, status, stop]);
+        model.registerTermAgentChat(chat.sendMessage, chat.setMessages, chat.status, chat.stop);
+    }, [model, chat.sendMessage, chat.setMessages, chat.status, chat.stop]);
 
     useEffect(() => {
         if ("syncAgentMessages" in model) {
-            (model as any).syncAgentMessages(messages, status);
+            (model as any).syncAgentMessages(chat.messages, chat.status);
         }
-    }, [messages, status, model]);
+    }, [chat.messages, chat.status, model]);
 
+    return chat;
+}
+
+export const TermAgentChatProvider = memo(({ model }: { model: TermAgentModel }) => {
+    useTermAgentChat(model);
     return null;
 });
 
 TermAgentChatProvider.displayName = "TermAgentChatProvider";
 
+// Posture cycle order matches Claude Code's Shift+Tab convention
+// (default → acceptEdits → bypass → default). bench is API-only so it
+// isn't in the user-visible cycle.
+const postureCycle: ReadonlyArray<string> = ["default", "acceptEdits", "bypass"];
+
+function nextPosture(current: string): string {
+    const idx = postureCycle.indexOf(current);
+    return postureCycle[(idx + 1) % postureCycle.length] ?? "default";
+}
+
+// postureLabel renders the short status-pill label.
+function postureLabel(p: string): string {
+    switch (p) {
+        case "default":
+            return "ask each";
+        case "acceptEdits":
+            return "edits auto";
+        case "bypass":
+            return "bypass";
+        default:
+            return p;
+    }
+}
+
+// postureBorderClass picks a tint that signals strictness — neutral
+// for default, info for acceptEdits, warning for bypass. Matches the
+// design doc §8.6 status pill spec.
+function postureBorderClass(p: string): string {
+    switch (p) {
+        case "default":
+            return "border-zinc-600";
+        case "acceptEdits":
+            return "border-sky-500/60 text-sky-200";
+        case "bypass":
+            return "border-amber-500/60 text-amber-200";
+        default:
+            return "border-zinc-700";
+    }
+}
+
 export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
     const visible = jotai.useAtomValue(model.termAgentVisible);
     const composerOpen = jotai.useAtomValue(model.termAgentComposerOpen);
     const inputValue = jotai.useAtomValue(model.termAgentInput);
-    const errorText = jotai.useAtomValue(model.termAgentError);
-    const agentMode = jotai.useAtomValue(model.termAgentAgentMode);
+    const errorText = jotai.useAtomValue(model.termAgentNotice);
+    const posture = jotai.useAtomValue(model.termAgentPosture);
     const chatId = jotai.useAtomValue(model.termAgentChatId);
+    // Single-term view doesn't mount TermAgentChatProvider separately,
+    // so the overlay owns its own chat. The hook handles the same
+    // model registration + sync work either provider would.
+    const { messages, status, stop } = useTermAgentChat(model);
     const approvalCtx = useMemo<TermAgentApprovalContextValue>(
-        () => ({ chatId, getCwd: () => model.getTermAgentCwd() }),
+        () => ({
+            chatId,
+            getCwd: () => model.getTermAgentCwd(),
+            tabId: model.tabModel?.tabId ?? "",
+            anchorBlockId: model.blockId ?? "",
+        }),
         [chatId, model]
     );
+
+    const cyclePosture = () => {
+        globalStore.set(model.termAgentPosture, nextPosture(globalStore.get(model.termAgentPosture)));
+    };
+
+    // Shift+Tab cycles posture when the overlay (or composer) has
+    // focus. We listen at the document level because the composer
+    // input may swallow Tab events; bound to the overlay-visible
+    // window so no global keybind fires when the overlay is hidden.
+    useEffect(() => {
+        if (!visible) return;
+        const handler = (e: KeyboardEvent) => {
+            if (e.key !== "Tab" || !e.shiftKey) return;
+            // Only handle when an element inside the overlay has focus.
+            const target = e.target as HTMLElement | null;
+            if (!target || !target.closest?.("[data-term-agent-overlay]")) return;
+            e.preventDefault();
+            cyclePosture();
+        };
+        document.addEventListener("keydown", handler);
+        return () => document.removeEventListener("keydown", handler);
+    }, [visible, model]);
     const scrollRef = useRef<HTMLDivElement>(null);
     const composerInputRef = useRef<HTMLInputElement>(null);
 
@@ -517,16 +695,21 @@ export const TermAgentOverlay = memo(({ model }: TermAgentOverlayProps) => {
         return null;
     }
 
-    const mode = agentMode;
-
     return (
         <TermAgentApprovalContext.Provider value={approvalCtx}>
-        <div className="pointer-events-none absolute inset-x-3 bottom-3 z-[var(--zindex-block-mask-inner)] flex justify-center">
+        <div data-term-agent-overlay className="pointer-events-none absolute inset-x-3 bottom-3 z-[var(--zindex-block-mask-inner)] flex justify-center">
             <div className="pointer-events-auto w-full max-w-[860px] overflow-hidden rounded-2xl border border-zinc-700/80 bg-[rgb(16_16_18_/_0.94)] shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-xl">
                 <div className="flex items-center justify-between border-b border-zinc-800 px-3 py-2 text-xs text-zinc-400">
                     <div className="flex items-center gap-2">
                         <span className="font-medium text-zinc-100">Terminal Agent</span>
-                        <span className="rounded-full border border-zinc-700 px-2 py-0.5">{mode}</span>
+                        <button
+                            type="button"
+                            onClick={cyclePosture}
+                            title="Permission posture — click or Shift+Tab to cycle"
+                            className={`rounded-full border px-2 py-0.5 transition-colors hover:bg-white/5 cursor-pointer ${postureBorderClass(posture)}`}
+                        >
+                            {postureLabel(posture)}
+                        </button>
                         {status === "streaming" || status === "submitted" ? (
                             <span className="text-[var(--color-accent)]">Running</span>
                         ) : null}

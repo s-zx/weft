@@ -45,3 +45,6 @@ docs/superpowers
 .claude
 ROADMAP.md
 ROADMAP-v2.md
+
+# Agent run-time traces — local diagnostic dumps, not source
+.crest-trajectories/

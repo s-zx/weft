@@ -20,6 +20,112 @@ export type AppNotification = {
 };
 
 const MAX_NOTIFICATIONS = 50;
+const CliAgentTitle = "warp://cli-agent";
+
+type CliAgentPayload = {
+    agent?: string;
+    event?: string;
+    title?: string;
+    body?: string;
+    message?: string;
+    summary?: string;
+    error?: string;
+    requires_user_action?: boolean;
+    needs_user_action?: boolean;
+    awaiting_input?: boolean;
+    approval_required?: boolean;
+};
+
+type NormalizedNotification = {
+    title?: string;
+    body: string;
+};
+
+function parseCliAgentPayload(title: string | undefined, body: string): CliAgentPayload | null {
+    if (!title?.startsWith(CliAgentTitle)) {
+        return null;
+    }
+    try {
+        const parsed = JSON.parse(body);
+        if (parsed == null || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return null;
+        }
+        return parsed as CliAgentPayload;
+    } catch {
+        return null;
+    }
+}
+
+function formatCliAgentName(agent: string | undefined): string {
+    const normalized = agent?.trim().toLowerCase();
+    if (!normalized) {
+        return "CLI Agent";
+    }
+    if (normalized === "claude") {
+        return "Claude Code";
+    }
+    return normalized
+        .split(/[\s_-]+/)
+        .filter(Boolean)
+        .map((part) => part[0].toUpperCase() + part.slice(1))
+        .join(" ");
+}
+
+function isCliAgentUserActionEvent(eventName: string): boolean {
+    return /(attention|input|approval|confirm|permission|auth|login|question|prompt|choose|required|review)/.test(
+        eventName
+    );
+}
+
+function isCliAgentCompletionEvent(eventName: string): boolean {
+    return /(complete|completed|finish|finished|end|ended|done|stop|stopped|cancel|cancelled|abort|aborted|exit|exited|error|failed|blocked)/.test(
+        eventName
+    );
+}
+
+// Warp/Claude-style CLI agents can emit a stream of lifecycle notifications
+// (session_start, turn_start, etc.). Those are noisy in Crest; only surface
+// completion or explicit user-attention events.
+export function normalizeCmdBlockNotification(title: string | undefined, body: string): NormalizedNotification | null {
+    const payload = parseCliAgentPayload(title, body);
+    if (payload == null) {
+        return { title: title || undefined, body };
+    }
+
+    const eventName = payload.event?.trim().toLowerCase() ?? "";
+    const needsUserAction =
+        payload.requires_user_action === true ||
+        payload.needs_user_action === true ||
+        payload.awaiting_input === true ||
+        payload.approval_required === true ||
+        (eventName !== "" && isCliAgentUserActionEvent(eventName));
+    const isCompletion = eventName !== "" && isCliAgentCompletionEvent(eventName);
+    if (!needsUserAction && !isCompletion && eventName !== "") {
+        return null;
+    }
+
+    const agentName = formatCliAgentName(payload.agent);
+    const detail =
+        payload.message?.trim() ||
+        payload.summary?.trim() ||
+        payload.body?.trim() ||
+        payload.error?.trim() ||
+        "";
+
+    if (detail !== "") {
+        return { title: agentName, body: detail };
+    }
+    if (needsUserAction) {
+        return { title: agentName, body: `${agentName} needs your attention` };
+    }
+    if (isCompletion) {
+        return { title: agentName, body: `${agentName} task finished` };
+    }
+    if (eventName !== "") {
+        return { title: agentName, body: `${agentName}: ${eventName.replace(/[_-]+/g, " ")}` };
+    }
+    return { title: agentName, body };
+}
 
 export class NotificationsModel {
     private static instance: NotificationsModel | null = null;
@@ -55,6 +161,8 @@ export class NotificationsModel {
             handler: (event) => {
                 const ev = event.data as CmdBlockNotifyEvent | undefined;
                 if (!ev?.blockid || !ev.body) return;
+                const normalized = normalizeCmdBlockNotification(ev.title, ev.body);
+                if (normalized == null) return;
 
                 // Skip when the user is already looking at this block's tab —
                 // the agent output is visible inline; no need for an alert.
@@ -81,8 +189,8 @@ export class NotificationsModel {
                     id: `${ev.blockid}:${now}:${Math.random().toString(36).slice(2, 7)}`,
                     blockId: ev.blockid,
                     tabId,
-                    title: ev.title || undefined,
-                    body: ev.body,
+                    title: normalized.title,
+                    body: normalized.body,
                     ts: now,
                     read: false,
                 };
